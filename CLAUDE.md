@@ -40,16 +40,32 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Kyverno: signed images only, no root, resource limits required, no `:latest`
 - Pod Security Admission at `restricted`
 
-## The app: fake-money investing app (always running locally)
+## The app: newsletter-signal portfolio tracker (always running locally)
+**Goal:** Track a paid newsletter author's model portfolio (Google Sheet + weekly/mid-week emails) alongside MY real positions, and alert me on my phone — especially WHEN TO EXIT his non-long-term ("Trend") picks. Long-term ("Infinity") picks are set-and-forget.
+
+**Design principles (decided 2026-10-18):**
+- **Rules decide, Claude reads.** Alerts come from deterministic rules on his data (trend stop, valuation zones, timely-buy flags, his trims). Claude (Haiku) only extracts structure from emails and writes summaries. Claude does not give investment advice.
+- **Alerts only.** No brokerage API, no trade execution, no brokerage credentials anywhere.
+- **Licensed data stays private.** His sheet/picks/emails live only in local Postgres. Never in the public repo, never in test fixtures (use fake tickers/numbers), never screenshots.
+- **Data path:** his sheet → my own Google Sheet (IMPORTRANGE or manual copy) → app reads MY sheet via Sheets API (read-only service account, shared on that one sheet only) → poll + diff snapshots → change events. Never scrape his sheet or seekingalpha.com.
+- **Notifications:** Telegram bot or ntfy (not SMS).
+
+**Key fields from his sheet:** ticker, timeframe (Trend/Infinity), priority, top long-term pick, timely buy now, his avg entry, trend stop, fair value, cheap, deeply undervalued, too expensive, update date.
+
 | Service | Job | k8s concepts it teaches |
 |---|---|---|
-| market-data | Pulls prices on a schedule (Finnhub/Alpha Vantage free tier) | CronJob, Secrets, egress NetworkPolicy |
-| research | Claude API (Haiku) analyzes prices/news → buy/sell signals | Workers, queues, egress to one domain |
-| trader | Executes fake trades from signals | Service-to-service auth, mTLS later |
-| portfolio-api | Holdings and P&L | Deployment, Service, probes, HPA |
+| sheet-sync | Poll my Google Sheet, snapshot + diff → change events ("stop raised 5→6", "new Timely Buy", "ticker removed") | CronJob, Secrets (SA key), egress to Google only |
+| market-data | Daily closing prices after market close | CronJob, Secrets, egress NetworkPolicy |
+| rules | My positions × his signals → alerts (close < trend stop, zone crossings, his changes) | Deployment, Redis queue consumer |
+| notifier | Send alerts to Telegram/ntfy | Worker, egress to one domain |
+| ingest (v2) | Parse his emails with Claude Haiku → structured updates | CronJob, Secrets, egress to 2 domains |
+| portfolio-api | My positions, his picks, alert history | Deployment, Service, probes, HPA |
 | frontend | Dashboard | Ingress, TLS |
-| Postgres | Portfolios + trades | StatefulSet + PVC |
-| Redis | Queue between research and trader | KEDA scaling on queue depth |
+| Postgres | Positions, snapshots, alerts | StatefulSet + PVC |
+| Redis | Queue between sheet-sync/market-data and rules | KEDA scaling on queue depth |
+
+**v1 (smallest useful thing):** picks + my positions loaded from a file → daily price CronJob → rule "close < trend stop on a Trend pick I own" → one Telegram/ntfy message.
+**Open:** how his updates arrive (email? to Gmail?) — known after subscribing.
 
 ## Roadmap (in order)
 1. Tooling: Homebrew, Colima, kind, kubectl, k9s, Helm — tour a fresh cluster (nodes, pods, namespaces, DaemonSets)
@@ -68,10 +84,7 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Never commit secrets. API keys go in k8s Secrets / local `.env` (gitignored).
 - Ask before installing anything new on my machine.
 - Keep a short `NOTES.md` log of what we learned each session.
-
-## ⚠️ Project idea changed (2026-10-17)
-Singh has revised the app idea. **Before writing any app/service code** (starting at roadmap step 2, portfolio-api), STOP and ask Singh for the updated idea. Do not assume the service table above is current.
-
+- Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Step 1 DONE (2026-10-18): tooling, Colima, kind cluster "invest" (1 CP + 2 workers), kubeconfig/RBAC identity, DaemonSets + reconciliation, k9s. NEXT: get revised app idea from Singh before step 2 (see flag above).
+Step 1 DONE (2026-10-18). App idea revised + agreed (see app section). NEXT: roadmap step 2 — portfolio-api by hand with kubectl.
