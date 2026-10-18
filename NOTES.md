@@ -35,3 +35,6 @@ Resume: `colima start` (remembers its config), then `kubectl get nodes`.
 
 ### ✅ Roadmap step 1 complete (2026-10-18)
 Next: STOP — get Singh's revised app idea before step 2.
+- Repo: https://github.com/JazSingh05/k8s-invest (public). 3 secret-scanning layers: gitleaks pre-commit hook (local, opt-in, bypassable with --no-verify) → CI (step 8, enforced) → GitHub push protection (server-side).
+- Git identity uses the GitHub noreply email so the real address isn't in public history. HTTPS + gh credential helper; token in macOS Keychain (broad `repo` scope — not least-privilege).
+- NOTE: the pre-commit hook lives in .git/hooks/, which is NOT committed → a fresh clone has no hook. Reinstall after cloning.
