@@ -64,8 +64,15 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 | Postgres | Positions, snapshots, alerts | StatefulSet + PVC |
 | Redis | Queue between sheet-sync/market-data and rules | KEDA scaling on queue depth |
 
-**v1 (smallest useful thing):** picks + my positions loaded from a file → daily price CronJob → rule "close < trend stop on a Trend pick I own" → one Telegram/ntfy message.
-**Open:** how his updates arrive (email? to Gmail?) — known after subscribing.
+**V1 scope (decided 2026-10-18) — long-term picks only, weekly digest:**
+- Input: his model portfolio data (my copy of his sheet; manual import first, sheet-sync later).
+- Filter: his long-term picks (Timeframe = Infinity and/or "Top Long Term Pick" — confirm after subscribing).
+- Weekly CronJob → Claude Haiku turns the data into a plain-English digest: his top long-term picks + priority, where each price sits vs HIS valuation levels (deeply undervalued / cheap / fair / too expensive), and what changed since last week.
+- The digest reports HIS recommendations and numbers. No opinions or picks of its own.
+- Delivered to my phone via ntfy or Telegram.
+- V1 services: portfolio-api (step 2), Postgres (step 3), weekly-digest CronJob + notifier (step 4). Current price comes from his sheet, so no market-data service yet.
+- Deferred to V2+: Trend picks, my positions, exit/stop alerts, email ingest, rules engine, Redis.
+**Open (after subscribing):** how his updates arrive (email? app push?); which model portfolio(s) I follow; exact definition of "long-term pick"; whether sheet or alerts update first.
 
 ## Roadmap (in order)
 1. Tooling: Homebrew, Colima, kind, kubectl, k9s, Helm — tour a fresh cluster (nodes, pods, namespaces, DaemonSets)
@@ -87,4 +94,4 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Step 1 DONE (2026-10-18). App idea revised + agreed (see app section). NEXT: roadmap step 2 — portfolio-api by hand with kubectl.
+Step 1 DONE (2026-10-18). App idea revised; V1 = weekly long-term-picks digest. WAITING: Singh subscribes and reports what the service actually provides. Can start step 2 (portfolio-api) with FAKE data meanwhile.
