@@ -1,0 +1,10 @@
+# kind cluster: 1 control plane + 2 workers.
+# Default CNI (kindnet) for now — it does NOT enforce NetworkPolicies.
+# In roadmap step 5 we recreate with `networking.disableDefaultCNI: true` + Calico.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: invest
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

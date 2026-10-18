@@ -1,0 +1,43 @@
+# --- Secrets: never commit ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+*-secret.yaml
+*.secret.yaml
+
+# --- Kubernetes credentials ---
+kubeconfig
+*.kubeconfig
+.kube/
+
+# --- Terraform (later, EKS phase) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# --- Helm ---
+charts/*/charts/
+*.tgz
+
+# --- OS / editor ---
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# --- Language build output (filled in as services are added) ---
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+bin/
