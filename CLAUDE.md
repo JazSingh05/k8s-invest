@@ -48,7 +48,7 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - **Alerts only.** No brokerage API, no trade execution, no brokerage credentials anywhere.
 - **Licensed data stays private.** His sheet/picks/emails live only in local Postgres. Never in the public repo, never in test fixtures (use fake tickers/numbers), never screenshots.
 - **Data path:** his sheet → my own Google Sheet (IMPORTRANGE or manual copy) → app reads MY sheet via Sheets API (read-only service account, shared on that one sheet only) → poll + diff snapshots → change events. Never scrape his sheet or seekingalpha.com.
-- **Notifications:** Telegram bot or ntfy (not SMS).
+- **Notifications:** Telegram bot (private chat). Not SMS, not public ntfy topics.
 
 **Key fields from his sheet:** ticker, timeframe (Trend/Infinity), priority, top long-term pick, timely buy now, his avg entry, trend stop, fair value, cheap, deeply undervalued, too expensive, update date.
 
@@ -64,15 +64,18 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 | Postgres | Positions, snapshots, alerts | StatefulSet + PVC |
 | Redis | Queue between sheet-sync/market-data and rules | KEDA scaling on queue depth |
 
-**V1 scope (decided 2026-10-18) — long-term picks only, weekly digest:**
+**V1 scope (updated 2026-10-18) — ALL long-term picks, ranked, DAILY digest on Telegram:**
 - Input: his model portfolio data (my copy of his sheet; manual import first, sheet-sync later).
-- Filter: his long-term picks (Timeframe = Infinity and/or "Top Long Term Pick" — confirm after subscribing).
-- Weekly CronJob → Claude Haiku turns the data into a plain-English digest: his top long-term picks + priority, where each price sits vs HIS valuation levels (deeply undervalued / cheap / fair / too expensive), and what changed since last week.
+- **Long-term pick** = Timeframe = "Infinity" OR "Top Long Term Pick" flag set (union). Tag each with which signal(s) it has. Edge case seen in sample: a pick can be Timeframe "Trend" AND flagged "Top Long Term Pick" — include it, mark it "Trend + Top LT" since his trend stop still applies.
+- **Ranking:** Priority Ranking (higher first) → Top Long Term Pick flag → his Exposure % (higher first). Confirm Priority meaning after subscribing.
+- **Daily CronJob** after US market close (~5:30pm ET) → Claude Haiku writes the digest: "what changed since yesterday" first, then the full ranked list with price vs HIS valuation levels (deeply undervalued / cheap / fair / too expensive).
 - The digest reports HIS recommendations and numbers. No opinions or picks of its own.
-- Delivered to my phone via ntfy or Telegram.
-- V1 services: portfolio-api (step 2), Postgres (step 3), weekly-digest CronJob + notifier (step 4). Current price comes from his sheet, so no market-data service yet.
+- **Delivery: Telegram bot** (private chat; bot token in a k8s Secret). Not ntfy.sh — public topics would leak licensed data. No dollar amounts of MY positions in messages (bot chats aren't E2E encrypted).
+- CronJob uses `startingDeadlineSeconds` so a run missed while the laptop sleeps runs on wake; job is idempotent (based on latest data, safe to re-run).
+- V1 services: portfolio-api (step 2), Postgres (step 3), daily-digest CronJob + Telegram notifier (step 4). Current price comes from his sheet → no market-data service yet.
+- **Later:** web dashboard in-cluster (step 5, Ingress + TLS) with history, linked from each message; phone access via Tailscale, never exposed to the internet. No native app.
 - Deferred to V2+: Trend picks, my positions, exit/stop alerts, email ingest, rules engine, Redis.
-**Open (after subscribing):** how his updates arrive (email? app push?); which model portfolio(s) I follow; exact definition of "long-term pick"; whether sheet or alerts update first.
+**Open (after subscribing):** how his updates arrive (email? app push?); which model portfolio(s) I follow; meaning of Priority Ranking (is 3 best?); whether sheet or alerts update first.
 
 ## Roadmap (in order)
 1. Tooling: Homebrew, Colima, kind, kubectl, k9s, Helm — tour a fresh cluster (nodes, pods, namespaces, DaemonSets)
@@ -94,4 +97,4 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Step 1 DONE (2026-10-18). App idea revised; V1 = weekly long-term-picks digest. WAITING: Singh subscribes and reports what the service actually provides. Can start step 2 (portfolio-api) with FAKE data meanwhile.
+Step 1 DONE (2026-10-18). App idea revised; V1 = DAILY digest of all long-term picks, ranked, via Telegram. WAITING: Singh subscribes and reports what the service actually provides. Can start step 2 (portfolio-api) with FAKE data meanwhile.
