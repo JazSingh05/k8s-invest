@@ -68,6 +68,12 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Input: his model portfolio data (my copy of his sheet; manual import first, sheet-sync later).
 - **Long-term pick** = Timeframe = "Infinity" OR "Top Long Term Pick" flag set (union). Tag each with which signal(s) it has. Edge case seen in sample: a pick can be Timeframe "Trend" AND flagged "Top Long Term Pick" — include it, mark it "Trend + Top LT" since his trend stop still applies.
 - **Ranking:** Priority Ranking (higher first) → Top Long Term Pick flag → his Exposure % (higher first). Confirm Priority meaning after subscribing.
+- **Two views, never blended into one score:** (1) *Conviction* = the ranking above (changes only when he edits). (2) *Valuation today* = which of HIS zones the price is in (changes daily). Shown side by side; no Claude-invented weighting.
+- **Zone rule (his numbers only):** price ≤ Deeply Undervalued → Deeply undervalued; ≤ Cheap → Cheap; ≤ Fair Value → Below fair; < Too Expensive → Above fair; ≥ Too Expensive → Too expensive. Blank valuations (e.g. ETFs) → "n/a".
+- **Distance** = (level − price) / price (verified against his sheet: positive = price below that level).
+- **Stale flag:** valuation Update Date older than 60 days → "⚠️ stale".
+- **Daily changes to report:** zone crossings, his edits to levels/priority/flags, picks added/removed.
+- Ignored in V1: Trend Stop, Price to Stop, Portfolio Risk, Investment Return to Stop, Daily Change, Shares, his Return.
 - **Daily CronJob** after US market close (~5:30pm ET) → Claude Haiku writes the digest: "what changed since yesterday" first, then the full ranked list with price vs HIS valuation levels (deeply undervalued / cheap / fair / too expensive).
 - The digest reports HIS recommendations and numbers. No opinions or picks of its own.
 - **Delivery: Telegram bot** (private chat; bot token in a k8s Secret). Not ntfy.sh — public topics would leak licensed data. No dollar amounts of MY positions in messages (bot chats aren't E2E encrypted).
@@ -75,7 +81,9 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - V1 services: portfolio-api (step 2), Postgres (step 3), daily-digest CronJob + Telegram notifier (step 4). Current price comes from his sheet → no market-data service yet.
 - **Later:** web dashboard in-cluster (step 5, Ingress + TLS) with history, linked from each message; phone access via Tailscale, never exposed to the internet. No native app.
 - Deferred to V2+: Trend picks, my positions, exit/stop alerts, email ingest, rules engine, Redis.
-**Open (after subscribing):** how his updates arrive (email? app push?); which model portfolio(s) I follow; meaning of Priority Ranking (is 3 best?); whether sheet or alerts update first.
+**Build-first plan (decided 2026-10-19):** build the whole V1 now against a FAKE sheet with the same columns as his (fake tickers/numbers), then subscribe and plug in. Plug-and-play = sheet ID + header→field mapping live in a ConfigMap; columns matched by HEADER NAME, not position, so layout differences only need a config change.
+**Service facts (checkout page, 2026-10-19):** $599/yr; annual plan cancellable in first month for refund of remaining 11 months. Includes Long-Term Growth Portfolio (our V1 target), PowerFactors Microcaps, options/ETF strategies, weekly macro, chatroom with live trade alerts, valuation spreadsheet.
+**Open (after subscribing):** do trade alerts also arrive by email or only in chat; meaning of Priority Ranking (is 3 best?); meaning of purple-colored valuation numbers; real sheet layout (tabs, merged headers, hidden rows); whether sheet or alerts update first.
 
 ## Roadmap (in order)
 1. Tooling: Homebrew, Colima, kind, kubectl, k9s, Helm — tour a fresh cluster (nodes, pods, namespaces, DaemonSets)
