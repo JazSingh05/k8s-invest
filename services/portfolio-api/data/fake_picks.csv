@@ -1,0 +1,8 @@
+Ticker,Shares,Exposure $,Exposure %,Timeframe,Priority Ranking,Top Long Term Pick,Timely Buy Now,Current Price,Average Entry,Trend Stop,Update Date,Fair Value,Cheap Valuation,Deeply Undervalued,Too Expensive
+FAKEA,100,"$20,000",4.0%,Infinity,3,Top Long Term Pick,,200.00,50.0,150,9/1/2026,150,110,80,300
+FAKEB,300,"$15,000",3.0%,Trend,2,Top Long Term Pick,,50.00,40.0,42,9/20/2026,55,45,35,80
+FAKEC,50,"$12,500",2.5%,Infinity,2,,Timely Buy Now,250.00,240.0,,6/1/2026,400,300,260,600
+FAKED,1000,"$10,000",2.0%,Infinity,3,,,10.00,12.0,,9/15/2026,14,12,8,20
+FAKEE,400,"$8,000",1.6%,Trend,2,,Timely Buy Now,20.00,22.0,18,9/10/2026,25,18,14,35
+FAKEF,200,"$9,000",1.8%,Infinity,1,,,45.00,30.0,,9/12/2026,,,,
+FAKEG,80,"$24,000",4.8%,Infinity,3,Top Long Term Pick,,300.00,100.0,,9/18/2026,200,150,120,280
