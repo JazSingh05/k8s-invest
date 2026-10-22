@@ -38,3 +38,13 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Repo: https://github.com/JazSingh05/k8s-invest (public). 3 secret-scanning layers: gitleaks pre-commit hook (local, opt-in, bypassable with --no-verify) → CI (step 8, enforced) → GitHub push protection (server-side).
 - Git identity uses the GitHub noreply email so the real address isn't in public history. HTTPS + gh credential helper; token in macOS Keychain (broad `repo` scope — not least-privilege).
 - NOTE: the pre-commit hook lives in .git/hooks/, which is NOT committed → a fresh clone has no hook. Reinstall after cloning.
+
+## Session — 2026-10-19 → 10-21: trunk-based + step 2a
+- Trunk-based: main protected by GitHub ruleset `protect-main` (PR required, no force push/delete, linear history), squash-only, branches auto-delete. Later Argo CD deploys main → protecting main = protecting prod.
+- portfolio-api: rules in picks.py (pure functions) separate from web layer main.py (FastAPI) → rules testable without a server, reusable by the digest CronJob.
+- Columns matched by header NAME, not position → real sheet can differ, only config changes.
+- Dockerfile: 3 stages. deps (venv; requirements copied BEFORE code so code edits reuse the cached pip layer) → test (pytest; failing test = failed build) → runtime (clean base, only venv+app copied, USER 10001). Base pinned by digest.
+- .dockerignore kept build context at 22KB (no .venv upload).
+- `docker run` puts the container NEXT TO the kind nodes, not in the cluster. Each kind node has its own containerd image store → need `kind load docker-image` (or a registry) or pods hit ImagePullBackOff.
+- Verified: /picks ranking matches tests; `id` → uid=10001; /docs disabled by default.
+- Tooling: uv + Python 3.13 venv for VS Code/pytest locally; Docker CLI lacks buildx (legacy builder) → add before step 8.
