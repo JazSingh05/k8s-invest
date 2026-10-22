@@ -1,0 +1,6 @@
+# A namespace is a folder for cluster objects: names, RBAC and (later) NetworkPolicies
+# and quotas are scoped to it. All of our app lives in "invest", away from kube-system.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: invest

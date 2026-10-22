@@ -48,3 +48,16 @@ Next: STOP — get Singh's revised app idea before step 2.
 - `docker run` puts the container NEXT TO the kind nodes, not in the cluster. Each kind node has its own containerd image store → need `kind load docker-image` (or a registry) or pods hit ImagePullBackOff.
 - Verified: /picks ranking matches tests; `id` → uid=10001; /docs disabled by default.
 - Tooling: uv + Python 3.13 venv for VS Code/pytest locally; Docker CLI lacks buildx (legacy builder) → add before step 8.
+
+## Session — 2026-10-21: step 2b (in progress)
+- Namespace `invest` for the app (RBAC / NetworkPolicy / PSA boundary later).
+- Bare Pod with short image name → kubelet expands to docker.io/library/... → ErrImagePull → ImagePullBackOff (backoff 10s→5m). Short names = supply-chain risk; use fully qualified registry names (GHCR, step 8).
+- `kind load docker-image` copies the image into EACH node's containerd store (no registry). Pod recovered by itself on next retry — same pod object, no re-apply.
+- port-forward goes through the API server (RBAC `pods/portforward` bypasses NetworkPolicy); tied to ONE pod; needs its own terminal tab.
+- Deleted bare pod → stays gone (no controller). Deployment → ReplicaSet (pod-template-hash) → Pods. Deleted pod → ReplicaSet recreated it with a NEW name and NEW IP.
+- `kubectl diff` = terraform plan. Showed server defaults: RollingUpdate 25%/25%, revisionHistoryLimit 10, IfNotPresent, empty securityContext + resources (fix in steps 6/9).
+- `last-applied-configuration` annotation stores the whole applied file → Secrets applied client-side get a 2nd copy in the annotation → use server-side apply for Secrets.
+- Scaling changes replicas on the SAME ReplicaSet. Control plane tainted NoSchedule → app pods never land there (protects etcd/CA). Scale-down deletes: unready first → keep spread → newer (bucketed) first.
+
+### Paused here
+Service manifest written (k8s/portfolio-api/service.yaml), NOT applied yet. Resume: `kubectl apply -f k8s/portfolio-api/service.yaml` → `kubectl get service,endpointslices -n invest` → in-cluster curl via throwaway pod → break it (scale to 0, see endpoints empty) → commit + PR for step 2b.
