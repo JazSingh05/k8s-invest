@@ -1,0 +1,17 @@
+# Step 2b, part 3: a Service — one stable name + virtual IP in front of a changing set of pods.
+# Clients call http://portfolio-api.invest:80; kube-proxy routes to a healthy pod's :8000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-api
+  namespace: invest
+  labels:
+    app: portfolio-api
+spec:
+  type: ClusterIP              # reachable only from inside the cluster (the default)
+  selector:
+    app: portfolio-api         # route to every pod with this label — no pod names, no IPs
+  ports:
+    - name: http
+      port: 80                 # the port clients call on the Service
+      targetPort: 8000         # the port uvicorn listens on inside each pod

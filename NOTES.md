@@ -48,3 +48,25 @@ Next: STOP — get Singh's revised app idea before step 2.
 - `docker run` puts the container NEXT TO the kind nodes, not in the cluster. Each kind node has its own containerd image store → need `kind load docker-image` (or a registry) or pods hit ImagePullBackOff.
 - Verified: /picks ranking matches tests; `id` → uid=10001; /docs disabled by default.
 - Tooling: uv + Python 3.13 venv for VS Code/pytest locally; Docker CLI lacks buildx (legacy builder) → add before step 8.
+
+## Session — 2026-10-21: step 2b (in progress)
+- Namespace `invest` for the app (RBAC / NetworkPolicy / PSA boundary later).
+- Bare Pod with short image name → kubelet expands to docker.io/library/... → ErrImagePull → ImagePullBackOff (backoff 10s→5m). Short names = supply-chain risk; use fully qualified registry names (GHCR, step 8).
+- `kind load docker-image` copies the image into EACH node's containerd store (no registry). Pod recovered by itself on next retry — same pod object, no re-apply.
+- port-forward goes through the API server (RBAC `pods/portforward` bypasses NetworkPolicy); tied to ONE pod; needs its own terminal tab.
+- Deleted bare pod → stays gone (no controller). Deployment → ReplicaSet (pod-template-hash) → Pods. Deleted pod → ReplicaSet recreated it with a NEW name and NEW IP.
+- `kubectl diff` = terraform plan. Showed server defaults: RollingUpdate 25%/25%, revisionHistoryLimit 10, IfNotPresent, empty securityContext + resources (fix in steps 6/9).
+- `last-applied-configuration` annotation stores the whole applied file → Secrets applied client-side get a 2nd copy in the annotation → use server-side apply for Secrets.
+- Scaling changes replicas on the SAME ReplicaSet. Control plane tainted NoSchedule → app pods never land there (protects etcd/CA). Scale-down deletes: unready first → keep spread → newer (bucketed) first.
+
+## Session — 2026-10-23: Service
+- Pods survived `colima stop/start` (same names, RESTARTS 1) but got NEW IPs (10.244.2.3/1.4 → 1.2/2.2). Loaded image survived too (containerd store on /var volume).
+- Service `portfolio-api` (ClusterIP 10.96.84.149, port 80 → targetPort 8000). Selects pods by label, not name/IP. EndpointSlice = live list of pod IPs.
+- Saw kube-proxy's iptables rules on a node: KUBE-SERVICES (match ClusterIP) → KUBE-SVC (random, probability 0.5) → KUBE-SEP (DNAT to pod IP:8000). Routing happens in the caller node's kernel; kube-proxy only writes rules.
+- Service IPs (10.96.x) and pod IPs (10.244.x) are separate ranges. ClusterIP = routing, not access control → NetworkPolicies in step 5.
+- In-cluster test: `kubectl run tmp --rm -it ... curlimages/curl` → by name `http://portfolio-api`. Fast commands race the attach (output lost) → add `sleep 2` or read `kubectl logs`. Interactive sessions are recorded in container logs → never paste secrets.
+- Broke it: scaled to 0 (imperative `kubectl scale`) → Service + ClusterIP unchanged, EndpointSlice empty → curl fails INSTANTLY (exit 7, 1 ms): kube-proxy installs REJECT for endpoint-less Services. Exit 6 would mean DNS failed (no Service).
+- Drift: live replicas 0 vs git 2; `last-applied-configuration` still said 2 (only `apply` writes it). `kubectl diff` showed it; `kubectl apply` restored it; empty diff afterwards = in sync. GitOps (Argo CD) automates exactly this.
+- Pods came back with new IPs again (10.244.1.8, 2.3); Service didn't care.
+
+### ✅ Roadmap step 2 complete (2026-10-24)

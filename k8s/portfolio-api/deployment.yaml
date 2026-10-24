@@ -1,0 +1,24 @@
+# Step 2b, part 2: a Deployment — a controller that keeps N copies of a pod running.
+# Delete a pod, crash a node: the Deployment notices desired != actual and makes a new one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-api
+  namespace: invest
+  labels:
+    app: portfolio-api
+spec:
+  replicas: 2                   # desired state: always 2 pods
+  selector:
+    matchLabels:
+      app: portfolio-api        # "the pods I own are the ones with this label"
+  template:                     # the pod blueprint: same as our old pod.yaml's metadata + spec
+    metadata:
+      labels:
+        app: portfolio-api      # MUST match the selector above, or the API rejects it
+    spec:
+      containers:
+        - name: portfolio-api
+          image: portfolio-api:0.1.0
+          ports:
+            - containerPort: 8000
