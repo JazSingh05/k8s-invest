@@ -59,5 +59,12 @@ Next: STOP — get Singh's revised app idea before step 2.
 - `last-applied-configuration` annotation stores the whole applied file → Secrets applied client-side get a 2nd copy in the annotation → use server-side apply for Secrets.
 - Scaling changes replicas on the SAME ReplicaSet. Control plane tainted NoSchedule → app pods never land there (protects etcd/CA). Scale-down deletes: unready first → keep spread → newer (bucketed) first.
 
+## Session — 2026-10-23: Service
+- Pods survived `colima stop/start` (same names, RESTARTS 1) but got NEW IPs (10.244.2.3/1.4 → 1.2/2.2). Loaded image survived too (containerd store on /var volume).
+- Service `portfolio-api` (ClusterIP 10.96.84.149, port 80 → targetPort 8000). Selects pods by label, not name/IP. EndpointSlice = live list of pod IPs.
+- Saw kube-proxy's iptables rules on a node: KUBE-SERVICES (match ClusterIP) → KUBE-SVC (random, probability 0.5) → KUBE-SEP (DNAT to pod IP:8000). Routing happens in the caller node's kernel; kube-proxy only writes rules.
+- Service IPs (10.96.x) and pod IPs (10.244.x) are separate ranges. ClusterIP = routing, not access control → NetworkPolicies in step 5.
+- In-cluster test: `kubectl run tmp --rm -it ... curlimages/curl` → by name `http://portfolio-api`. Fast commands race the attach (output lost) → add `sleep 2` or read `kubectl logs`. Interactive sessions are recorded in container logs → never paste secrets.
+
 ### Paused here
-Service manifest written (k8s/portfolio-api/service.yaml), NOT applied yet. Resume: `kubectl apply -f k8s/portfolio-api/service.yaml` → `kubectl get service,endpointslices -n invest` → in-cluster curl via throwaway pod → break it (scale to 0, see endpoints empty) → commit + PR for step 2b.
+Next: `kubectl scale deployment portfolio-api -n invest --replicas=0` → see EndpointSlice empty, Service/ClusterIP unchanged, curl fails → `kubectl diff` shows drift from YAML (replicas 0 vs 2) → `kubectl apply` restores → commit + open step 2b PR.
