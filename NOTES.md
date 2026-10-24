@@ -75,5 +75,10 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Decided: push portfolio-api to GHCR as a PRIVATE package → cluster pulls with an imagePullSecret (dedicated read-only `read:packages` token, expiring) — not the broad gh token.
 - `docker login` without a helper stores base64 `user:token` in ~/.docker/config.json (plain text). Installed `docker-credential-helper` → `"credsStore": "osxkeychain"` → token goes to macOS Keychain. Backup: ~/.docker/config.json.bak.
 
+- Pushed `ghcr.io/jazsingh05/portfolio-api:0.1.1` (private, linked to repo via `org.opencontainers.image.source` LABEL). `gh auth refresh -s write:packages` = publisher cred, stays on laptop. config.json shows `"ghcr.io": {}` → token in Keychain, not on disk.
+- Layer cache is a chain: changing step N rebuilds N+1…end → put rarely-changing, slow steps (base, deps) early.
+- Colima uses containerd image store → local image ID == registry manifest digest.
+- Image ref `name:tag@sha256:…` → digest wins; tag is just a human label.
 ### Paused here
-Next: `gh auth refresh -s write:packages` → `gh auth token | docker login ghcr.io -u JazSingh05 --password-stdin` → confirm config.json has no `auth` value → Dockerfile source label → tag + push → Deployment to GHCR digest + `imagePullSecrets: ghcr-pull` → apply → 401 ImagePullBackOff → create read-only token + Secret (hidden prompt, not shell history) → recovers → rolling update + rollback → PR.
+Deployment.yaml edited (GHCR digest + `imagePullSecrets: ghcr-pull`) but NOT applied yet.
+Next: `kubectl diff` → apply → watch new ReplicaSet's pod hit 401 ImagePullBackOff while old pods keep serving → create read-only (`read:packages`, expiring) classic PAT → `ghcr-pull` docker-registry Secret via hidden prompt → pod recovers → rollout history + rollback → PR.
