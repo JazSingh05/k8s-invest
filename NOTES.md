@@ -65,6 +65,8 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Saw kube-proxy's iptables rules on a node: KUBE-SERVICES (match ClusterIP) → KUBE-SVC (random, probability 0.5) → KUBE-SEP (DNAT to pod IP:8000). Routing happens in the caller node's kernel; kube-proxy only writes rules.
 - Service IPs (10.96.x) and pod IPs (10.244.x) are separate ranges. ClusterIP = routing, not access control → NetworkPolicies in step 5.
 - In-cluster test: `kubectl run tmp --rm -it ... curlimages/curl` → by name `http://portfolio-api`. Fast commands race the attach (output lost) → add `sleep 2` or read `kubectl logs`. Interactive sessions are recorded in container logs → never paste secrets.
+- Broke it: scaled to 0 (imperative `kubectl scale`) → Service + ClusterIP unchanged, EndpointSlice empty → curl fails INSTANTLY (exit 7, 1 ms): kube-proxy installs REJECT for endpoint-less Services. Exit 6 would mean DNS failed (no Service).
+- Drift: live replicas 0 vs git 2; `last-applied-configuration` still said 2 (only `apply` writes it). `kubectl diff` showed it; `kubectl apply` restored it; empty diff afterwards = in sync. GitOps (Argo CD) automates exactly this.
+- Pods came back with new IPs again (10.244.1.8, 2.3); Service didn't care.
 
-### Paused here
-Next: `kubectl scale deployment portfolio-api -n invest --replicas=0` → see EndpointSlice empty, Service/ClusterIP unchanged, curl fails → `kubectl diff` shows drift from YAML (replicas 0 vs 2) → `kubectl apply` restores → commit + open step 2b PR.
+### ✅ Roadmap step 2 complete (2026-10-24)

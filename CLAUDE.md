@@ -105,4 +105,4 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Step 1 DONE (2026-10-18). App idea revised; V1 = DAILY digest of all long-term picks, ranked, via Telegram. WAITING: Singh subscribes and reports what the service actually provides. Can start step 2 (portfolio-api) with FAKE data meanwhile.
+Steps 1–2 DONE (2026-10-24): cluster tour; portfolio-api (FastAPI, fake data) running as Deployment (2 replicas) + ClusterIP Service in namespace `invest`; image loaded with `kind load` (no registry yet). Trunk-based: main protected, PRs + squash merges. NEXT: optional manual GHCR push, then step 3 (Postgres StatefulSet + PVC, ConfigMaps, Secrets). Still waiting on Singh's subscription for real data.
