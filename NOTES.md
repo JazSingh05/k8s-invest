@@ -70,3 +70,10 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Pods came back with new IPs again (10.244.1.8, 2.3); Service didn't care.
 
 ### ✅ Roadmap step 2 complete (2026-10-24)
+
+## Session — 2026-10-24: GHCR (private) prep
+- Decided: push portfolio-api to GHCR as a PRIVATE package → cluster pulls with an imagePullSecret (dedicated read-only `read:packages` token, expiring) — not the broad gh token.
+- `docker login` without a helper stores base64 `user:token` in ~/.docker/config.json (plain text). Installed `docker-credential-helper` → `"credsStore": "osxkeychain"` → token goes to macOS Keychain. Backup: ~/.docker/config.json.bak.
+
+### Paused here
+Next: `gh auth refresh -s write:packages` → `gh auth token | docker login ghcr.io -u JazSingh05 --password-stdin` → confirm config.json has no `auth` value → Dockerfile source label → tag + push → Deployment to GHCR digest + `imagePullSecrets: ghcr-pull` → apply → 401 ImagePullBackOff → create read-only token + Secret (hidden prompt, not shell history) → recovers → rolling update + rollback → PR.
