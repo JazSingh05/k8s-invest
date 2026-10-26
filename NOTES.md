@@ -106,4 +106,5 @@ Next: STOP — get Singh's revised app idea before step 2.
 Rollout still stuck (old pods serving). Vault configured; ESO NOT installed yet.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
+FIRST next session: explain TLS certs + CAs (cluster CA / ca.crt, how Vault verifies the API server, cert chain, mTLS like kubeconfig) — Singh asked.
 Next: `helm install external-secrets external-secrets/external-secrets --version 2.14.0 -n external-secrets --create-namespace -f k8s/external-secrets/values.yaml` → look at CRDs/pods → SecretStore (vault, kubernetes auth, serviceAccountRef eso-vault, audiences [vault]) + ExternalSecret (template → dockerconfigjson) → ghcr-pull appears → rollout finishes → break it (rotate, delete Secret, seal Vault) → rollback exercise → PR.
