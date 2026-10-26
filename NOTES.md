@@ -79,6 +79,22 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Layer cache is a chain: changing step N rebuilds N+1…end → put rarely-changing, slow steps (base, deps) early.
 - Colima uses containerd image store → local image ID == registry manifest digest.
 - Image ref `name:tag@sha256:…` → digest wins; tag is just a human label.
+
+## Session — 2026-10-25: rollout stuck on 401 → Vault for ESO
+- Applied GHCR Deployment → new ReplicaSet `777dfff9fb`, pod ImagePullBackOff (401 from `ghcr.io/token?scope=repository:…:pull` = registry v2 token flow, anonymous). Old RS kept 2/2 serving: maxSurge 25%→1, maxUnavailable 25%→0, so it waits for the new pod to be Ready. No readiness probe yet → "Ready" only means "started" (step 6).
+- generation bumps on every spec change; template change → new hash → new RS; old RS holds the old template (rollback).
+- Labels are routing, not identity: anyone who can create pods in `invest` can label one `app: portfolio-api` and receive Service traffic.
+- Every pod auto-mounts a SA token (`kube-api-access-*`, ~1h, rotated) → `automountServiceAccountToken: false` later. QoS BestEffort = first evicted.
+- zsh: single-quote args with `[ ]`, `?`, `*` (jsonpath/custom-columns).
+- Decided: pull secret comes from Vault via External Secrets Operator (not created by hand).
+- Vault: Helm chart 0.34.1 (`k8s/vault/values.yaml`), standalone, injector off. Chart pulled for reading into gitignored `charts-vendor/` (+ `vault-rendered.yaml` via `helm template`).
+- StatefulSet = stable names (vault-0) + PVC per pod from volumeClaimTemplates (`data-vault-0` = template-sts-ordinal). Headless Service (`ClusterIP None`) = per-pod DNS.
+- PVC/PV/StorageClass: claim = request, PV = actual storage, SC = recipe. `WaitForFirstConsumer` → scheduler picks the node first (`volume.kubernetes.io/selected-node` annotation), then local-path makes a 0777 folder on that node → PV node affinity pins vault-0 to invest-worker2 forever.
+- Vault init (1 share / threshold 1) → unseal key + root token straight into macOS Keychain (`kind-invest-vault-unseal`, `kind-invest-vault-root`), never printed. Vault stores neither (only a hash of the token); lose the unseal key = data gone. Readiness probe = "unsealed?".
+- Gotcha: `vault operator unseal -` does NOT read stdin. `vault write sys/unseal key=-` does.
+- Vault binds `system:auth-delegator` (TokenReview) → basis of the Kubernetes auth method. Listener TLS off (fine locally, finding in prod). Prod: auto-unseal with KMS.
 ### Paused here
-Deployment.yaml edited (GHCR digest + `imagePullSecrets: ghcr-pull`) but NOT applied yet.
-Next: `kubectl diff` → apply → watch new ReplicaSet's pod hit 401 ImagePullBackOff while old pods keep serving → create read-only (`read:packages`, expiring) classic PAT → `ghcr-pull` docker-registry Secret via hidden prompt → pod recovers → rollout history + rollback → PR.
+Rollout still stuck (ghcr-pull doesn't exist; old pods serving). Vault initialized + unsealed. Pull PAT (read:packages, 30d) was created but NOT stored anywhere yet → regenerate if lost.
+Every `colima start`: Vault comes back SEALED → unseal:
+`security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
+Next: look at encrypted files on worker2 → enable KV v2, write pull token → policy (read one path) + Kubernetes auth role for ESO's SA → install ESO (Helm) → SecretStore + ExternalSecret (dockerconfigjson template) → ghcr-pull appears → rollout finishes → break it (rotate, delete Secret, seal Vault) → rollback exercise → PR.
