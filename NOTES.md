@@ -93,8 +93,17 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Vault init (1 share / threshold 1) → unseal key + root token straight into macOS Keychain (`kind-invest-vault-unseal`, `kind-invest-vault-root`), never printed. Vault stores neither (only a hash of the token); lose the unseal key = data gone. Readiness probe = "unsealed?".
 - Gotcha: `vault operator unseal -` does NOT read stdin. `vault write sys/unseal key=-` does.
 - Vault binds `system:auth-delegator` (TokenReview) → basis of the Kubernetes auth method. Listener TLS off (fine locally, finding in prod). Prod: auto-unseal with KMS.
+
+## Session — 2026-10-25 (late): Vault identity for invest
+- Same Vault `cluster_id` after 3 VM restarts → PVC kept the data; unseal needed each start.
+- KV v2 at `secret/`; pull token at `secret/invest/ghcr-pull` (username + token). Real API path = `secret/data/invest/...` (policies use it).
+- Root token passed into the pod over stdin (`sh -c 'read -r VAULT_TOKEN; ...'`), never argv/screen. Vault config as code: `k8s/vault/configure.sh` + `policies/invest-read.hcl`.
+- Identity: SA `invest/eso-vault` (no pods, automount off) → Vault role `invest-eso` (bound SA name+namespace, `audience=vault`, policy invest-read, 15m). Dedicated per-namespace SA, not ESO's own → tenant boundary = namespace.
+- JWT = header.payload.signature; payload readable, signature by API server's sa.key; bearer token. Claims: aud, iss, sub, exp/iat/nbf, jti, SA uid (delete+recreate SA = revoke its tokens).
+- Tested by hand: login → read invest/ghcr-pull ✓, other path 403, write 403, token without aud=vault → 403 invalid audience (replay blocked).
+- ESO chart 2.14.0 pulled to charts-vendor/: 25 CRDs + controller + webhook (admission) + cert-controller. Controller ClusterRole = all Secrets everywhere + mint any SA token → its namespace is a crown jewel.
 ### Paused here
-Rollout still stuck (ghcr-pull doesn't exist; old pods serving). Vault initialized + unsealed. Pull PAT (read:packages, 30d) was created but NOT stored anywhere yet → regenerate if lost.
-Every `colima start`: Vault comes back SEALED → unseal:
+Rollout still stuck (old pods serving). Vault configured; ESO NOT installed yet.
+Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: look at encrypted files on worker2 → enable KV v2, write pull token → policy (read one path) + Kubernetes auth role for ESO's SA → install ESO (Helm) → SecretStore + ExternalSecret (dockerconfigjson template) → ghcr-pull appears → rollout finishes → break it (rotate, delete Secret, seal Vault) → rollback exercise → PR.
+Next: `helm install external-secrets external-secrets/external-secrets --version 2.14.0 -n external-secrets --create-namespace -f k8s/external-secrets/values.yaml` → look at CRDs/pods → SecretStore (vault, kubernetes auth, serviceAccountRef eso-vault, audiences [vault]) + ExternalSecret (template → dockerconfigjson) → ghcr-pull appears → rollout finishes → break it (rotate, delete Secret, seal Vault) → rollback exercise → PR.
