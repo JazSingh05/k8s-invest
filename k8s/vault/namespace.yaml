@@ -1,0 +1,6 @@
+# Owned here (not by `helm --create-namespace`) so it lives in git and can carry
+# labels, e.g. Pod Security Admission in step 9.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault

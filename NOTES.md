@@ -102,9 +102,20 @@ Next: STOP — get Singh's revised app idea before step 2.
 - JWT = header.payload.signature; payload readable, signature by API server's sa.key; bearer token. Claims: aud, iss, sub, exp/iat/nbf, jti, SA uid (delete+recreate SA = revoke its tokens).
 - Tested by hand: login → read invest/ghcr-pull ✓, other path 403, write 403, token without aud=vault → 403 invalid audience (replay blocked).
 - ESO chart 2.14.0 pulled to charts-vendor/: 25 CRDs + controller + webhook (admission) + cert-controller. Controller ClusterRole = all Secrets everywhere + mint any SA token → its namespace is a crown jewel.
+
+## Session — 2026-10-26: TLS/CA + ESO → rollout finished
+- TLS: key pair → cert = CA-signed "this public key belongs to <name>" (like a JWT for keys). Verify = signature + dates + SAN matches what you dialed + proof of private key. CA cert is self-signed trust anchor.
+- kind PKI (/etc/kubernetes/pki): cluster CA, separate etcd CA, front-proxy CA; sa.key = JWT signer (not a CA). API server is a server to us, a client to kubelet + etcd (all mTLS). apiserver.crt SANs incl 10.96.0.1, 127.0.0.1; 1y leaf (kind re-issued it when node IP changed), notBefore backdated 5m; CA 10y.
+- Same CA in 3 places: node pki (kubeadm init) → ConfigMap kube-root-ca.crt in every namespace (controller-manager root-ca-cert-publisher) → projected into every pod (token + ca.crt + namespace); kubeconfig (kind copied admin.conf, server rewritten to 127.0.0.1:49404).
+- `openssl s_client` without CA → verify code 21; that's what `-k`/insecureSkipTLSVerify accept. ca.key = crown jewel; certs can't be revoked.
+- etcd = cluster's key-value DB at /registry/<resource>/<ns>/<name>; only the API server talks to it (mTLS via etcd CA). etcdctl via healthcheck-client cert.
+- Namespaces now owned by YAML (k8s/vault/namespace.yaml, k8s/external-secrets/namespace.yaml), not `--create-namespace` → can carry PSA labels later.
+- Helm vs kubectl: our app = plain YAML (learning); third-party = Helm (34k lines for ESO; release tracking, upgrades prune, rollback). Chart ≈ Terraform module. Our own chart in step 7. `helm install --dry-run=server` = validate without changes; helm-diff plugin later.
+- ESO 2.14.0 installed: 25 CRDs (CRD = noun, controller = verb), controller + webhook (failurePolicy Fail = fail-closed) + cert-controller. Upstream ships restricted securityContext.
+- SecretStore `vault` (namespaced, serviceAccountRef eso-vault, audiences [vault]) → Valid in 3s. Client names the role; Vault decides policy. No SA token Secret exists (TokenRequest).
+- ExternalSecret `ghcr-pull`: fetch username+token → template into kubernetes.io/dockerconfigjson (kubelet requires Docker's config.json format) → Secret owned by the ExternalSecret, refresh 1m.
+- Stuck pod recovered on its next backoff retry → rollout finished: 777dfff9fb 2/2 (GHCR digest), 666c8f6695 scaled to 0. Second node pull: "already present on machine" (per-node image cache).
 ### Paused here
-Rollout still stuck (old pods serving). Vault configured; ESO NOT installed yet.
-Every `colima start`: unseal Vault:
+Rollout DONE. Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-FIRST next session: explain TLS certs + CAs (cluster CA / ca.crt, how Vault verifies the API server, cert chain, mTLS like kubeconfig) — Singh asked.
-Next: `helm install external-secrets external-secrets/external-secrets --version 2.14.0 -n external-secrets --create-namespace -f k8s/external-secrets/values.yaml` → look at CRDs/pods → SecretStore (vault, kubernetes auth, serviceAccountRef eso-vault, audiences [vault]) + ExternalSecret (template → dockerconfigjson) → ghcr-pull appears → rollout finishes → break it (rotate, delete Secret, seal Vault) → rollback exercise → PR.
+Next: curl portfolio-api/healthz via tmp pod → break it: rotate token in Vault (watch refresh), delete Secret ghcr-pull (ESO recreates), seal Vault (ESO errors, existing pods unaffected), webhook down (fail-closed) → read ghcr-pull from etcd in plaintext (no encryption at rest) → rollout history + undo → PR.

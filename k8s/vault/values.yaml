@@ -1,5 +1,5 @@
 # HashiCorp Vault, standalone, for local learning.
-# Install: helm install vault hashicorp/vault --version 0.34.1 -n vault --create-namespace -f k8s/vault/values.yaml
+# Install: kubectl apply -f k8s/vault/namespace.yaml && helm install vault hashicorp/vault --version 0.34.1 -n vault -f k8s/vault/values.yaml
 #
 # Standalone = 1 replica, StatefulSet + PVC (file storage at /vault/data), so data
 # survives `colima stop`. Starts SEALED after every restart -> unseal by hand.
