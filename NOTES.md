@@ -115,7 +115,18 @@ Next: STOP — get Singh's revised app idea before step 2.
 - SecretStore `vault` (namespaced, serviceAccountRef eso-vault, audiences [vault]) → Valid in 3s. Client names the role; Vault decides policy. No SA token Secret exists (TokenRequest).
 - ExternalSecret `ghcr-pull`: fetch username+token → template into kubernetes.io/dockerconfigjson (kubelet requires Docker's config.json format) → Secret owned by the ExternalSecret, refresh 1m.
 - Stuck pod recovered on its next backoff retry → rollout finished: 777dfff9fb 2/2 (GHCR digest), 666c8f6695 scaled to 0. Second node pull: "already present on machine" (per-node image cache).
+
+## Session — 2026-10-27: break-it on the secrets pipeline + rollback
+- Vault sealed after colima start → SecretStore InvalidProviderConfig, ExternalSecret SecretSyncedError, Secret kept, app fine. After unseal ESO stayed broken: exponential backoff (~16m cap). Nudge = `kubectl annotate … force-sync=$(date +%s) --overwrite` (watch event → immediate reconcile); prod: `kubectl rollout restart deploy/external-secrets` resets all queues. Each object has its own backoff.
+- Rotation: new PAT → `vault kv put` (KV v2 version 2) → ESO rewrote Secret within 1m (data-hash annotation; same data = no write) → cordon + `crictl rmi` + delete pod forced a real pull on a cache-less node → old PAT revoked. Running containers don't need their image (snapshot).
+- Deleted Secret ghcr-pull → ESO recreated it the same second (watches owned Secrets).
+- ESO webhook scaled to 0 → writes to ExternalSecret rejected (failurePolicy Fail, "connection refused" to webhook Service); status/sync kept working.
+- etcdctl read /registry/secrets/invest/ghcr-pull → token in plaintext. Wrote `scripts/enable-etcd-encryption.sh` (secretbox, key generated on node, NOT run yet). EKS: envelope encryption with customer-managed KMS key. Encryption at rest ≠ access control: RBAC get/list secrets still reads decrypted.
+- RBAC hardening added to roadmap step 9 (CLAUDE.md).
+- Rollback: `rollout undo` → old RS scaled up as revision 3; last-applied annotation untouched → drift vs git; `kubectl apply` → revision 4, no diff, /healthz ok.
+- New: docs/kooper-teddies-notes.md (study guide with Mermaid diagrams), updated each PR.
 ### Paused here
-Rollout DONE. Every `colima start`: unseal Vault:
+PR for feat/ghcr-private open. Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: curl portfolio-api/healthz via tmp pod → break it: rotate token in Vault (watch refresh), delete Secret ghcr-pull (ESO recreates), seal Vault (ESO errors, existing pods unaffected), webhook down (fail-closed) → read ghcr-pull from etcd in plaintext (no encryption at rest) → rollout history + undo → PR.
+Optional: run scripts/enable-etcd-encryption.sh and verify `k8s:enc:secretbox` prefix in etcd.
+Next: roadmap step 3 — Postgres StatefulSet + PVC, ConfigMaps (header map), Secrets via ESO.

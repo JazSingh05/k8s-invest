@@ -94,7 +94,7 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 6. Reliability: probes, PDBs, HPA, topology spread, resource requests/limits
 7. Helm charts, then Argo CD
 8. GHA CI with scanning, signing, SBOM
-9. Kyverno + Pod Security Admission
+9. Security hardening: **RBAC** (least-privilege Roles per namespace + per human/app identity, no wildcards, `get`/`list` on Secrets only for ESO, nobody else; `serviceaccounts/token` + `pods/exec` locked down; audit logging of Secret reads), Kyverno + Pod Security Admission, etcd encryption at rest (`scripts/enable-etcd-encryption.sh`; KMS on EKS), `automountServiceAccountToken: false` where unused
 10. Monitoring: Prometheus/Grafana (with PVCs)
 11. Later: EKS phase (Terraform apply/destroy per session, Pod Identity, ALB + LB Controller, VPC CNI, RDS)
 
@@ -105,4 +105,4 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Steps 1–2 DONE (2026-10-24): cluster tour; portfolio-api (FastAPI, fake data) running as Deployment (2 replicas) + ClusterIP Service in namespace `invest`; image loaded with `kind load` (no registry yet). Trunk-based: main protected, PRs + squash merges. NEXT: optional manual GHCR push, then step 3 (Postgres StatefulSet + PVC, ConfigMaps, Secrets). Still waiting on Singh's subscription for real data.
+Steps 1–2 DONE, plus a secrets detour (2026-10-27): portfolio-api pulled from a PRIVATE GHCR package by digest; pull secret synced from Vault (in-cluster, Helm, unsealed by hand each start) via External Secrets Operator using SA `invest/eso-vault` → Vault Kubernetes auth. Unseal command + session log in NOTES.md; study guide in docs/kooper-teddies-notes.md (update it each PR). NEXT: step 3 (Postgres StatefulSet + PVC, ConfigMaps, Secrets via ESO). Still waiting on Singh's subscription for real data.
