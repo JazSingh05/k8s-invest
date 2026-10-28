@@ -70,3 +70,63 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Pods came back with new IPs again (10.244.1.8, 2.3); Service didn't care.
 
 ### ✅ Roadmap step 2 complete (2026-10-24)
+
+## Session — 2026-10-24: GHCR (private) prep
+- Decided: push portfolio-api to GHCR as a PRIVATE package → cluster pulls with an imagePullSecret (dedicated read-only `read:packages` token, expiring) — not the broad gh token.
+- `docker login` without a helper stores base64 `user:token` in ~/.docker/config.json (plain text). Installed `docker-credential-helper` → `"credsStore": "osxkeychain"` → token goes to macOS Keychain. Backup: ~/.docker/config.json.bak.
+
+- Pushed `ghcr.io/jazsingh05/portfolio-api:0.1.1` (private, linked to repo via `org.opencontainers.image.source` LABEL). `gh auth refresh -s write:packages` = publisher cred, stays on laptop. config.json shows `"ghcr.io": {}` → token in Keychain, not on disk.
+- Layer cache is a chain: changing step N rebuilds N+1…end → put rarely-changing, slow steps (base, deps) early.
+- Colima uses containerd image store → local image ID == registry manifest digest.
+- Image ref `name:tag@sha256:…` → digest wins; tag is just a human label.
+
+## Session — 2026-10-25: rollout stuck on 401 → Vault for ESO
+- Applied GHCR Deployment → new ReplicaSet `777dfff9fb`, pod ImagePullBackOff (401 from `ghcr.io/token?scope=repository:…:pull` = registry v2 token flow, anonymous). Old RS kept 2/2 serving: maxSurge 25%→1, maxUnavailable 25%→0, so it waits for the new pod to be Ready. No readiness probe yet → "Ready" only means "started" (step 6).
+- generation bumps on every spec change; template change → new hash → new RS; old RS holds the old template (rollback).
+- Labels are routing, not identity: anyone who can create pods in `invest` can label one `app: portfolio-api` and receive Service traffic.
+- Every pod auto-mounts a SA token (`kube-api-access-*`, ~1h, rotated) → `automountServiceAccountToken: false` later. QoS BestEffort = first evicted.
+- zsh: single-quote args with `[ ]`, `?`, `*` (jsonpath/custom-columns).
+- Decided: pull secret comes from Vault via External Secrets Operator (not created by hand).
+- Vault: Helm chart 0.34.1 (`k8s/vault/values.yaml`), standalone, injector off. Chart pulled for reading into gitignored `charts-vendor/` (+ `vault-rendered.yaml` via `helm template`).
+- StatefulSet = stable names (vault-0) + PVC per pod from volumeClaimTemplates (`data-vault-0` = template-sts-ordinal). Headless Service (`ClusterIP None`) = per-pod DNS.
+- PVC/PV/StorageClass: claim = request, PV = actual storage, SC = recipe. `WaitForFirstConsumer` → scheduler picks the node first (`volume.kubernetes.io/selected-node` annotation), then local-path makes a 0777 folder on that node → PV node affinity pins vault-0 to invest-worker2 forever.
+- Vault init (1 share / threshold 1) → unseal key + root token straight into macOS Keychain (`kind-invest-vault-unseal`, `kind-invest-vault-root`), never printed. Vault stores neither (only a hash of the token); lose the unseal key = data gone. Readiness probe = "unsealed?".
+- Gotcha: `vault operator unseal -` does NOT read stdin. `vault write sys/unseal key=-` does.
+- Vault binds `system:auth-delegator` (TokenReview) → basis of the Kubernetes auth method. Listener TLS off (fine locally, finding in prod). Prod: auto-unseal with KMS.
+
+## Session — 2026-10-25 (late): Vault identity for invest
+- Same Vault `cluster_id` after 3 VM restarts → PVC kept the data; unseal needed each start.
+- KV v2 at `secret/`; pull token at `secret/invest/ghcr-pull` (username + token). Real API path = `secret/data/invest/...` (policies use it).
+- Root token passed into the pod over stdin (`sh -c 'read -r VAULT_TOKEN; ...'`), never argv/screen. Vault config as code: `k8s/vault/configure.sh` + `policies/invest-read.hcl`.
+- Identity: SA `invest/eso-vault` (no pods, automount off) → Vault role `invest-eso` (bound SA name+namespace, `audience=vault`, policy invest-read, 15m). Dedicated per-namespace SA, not ESO's own → tenant boundary = namespace.
+- JWT = header.payload.signature; payload readable, signature by API server's sa.key; bearer token. Claims: aud, iss, sub, exp/iat/nbf, jti, SA uid (delete+recreate SA = revoke its tokens).
+- Tested by hand: login → read invest/ghcr-pull ✓, other path 403, write 403, token without aud=vault → 403 invalid audience (replay blocked).
+- ESO chart 2.14.0 pulled to charts-vendor/: 25 CRDs + controller + webhook (admission) + cert-controller. Controller ClusterRole = all Secrets everywhere + mint any SA token → its namespace is a crown jewel.
+
+## Session — 2026-10-26: TLS/CA + ESO → rollout finished
+- TLS: key pair → cert = CA-signed "this public key belongs to <name>" (like a JWT for keys). Verify = signature + dates + SAN matches what you dialed + proof of private key. CA cert is self-signed trust anchor.
+- kind PKI (/etc/kubernetes/pki): cluster CA, separate etcd CA, front-proxy CA; sa.key = JWT signer (not a CA). API server is a server to us, a client to kubelet + etcd (all mTLS). apiserver.crt SANs incl 10.96.0.1, 127.0.0.1; 1y leaf (kind re-issued it when node IP changed), notBefore backdated 5m; CA 10y.
+- Same CA in 3 places: node pki (kubeadm init) → ConfigMap kube-root-ca.crt in every namespace (controller-manager root-ca-cert-publisher) → projected into every pod (token + ca.crt + namespace); kubeconfig (kind copied admin.conf, server rewritten to 127.0.0.1:49404).
+- `openssl s_client` without CA → verify code 21; that's what `-k`/insecureSkipTLSVerify accept. ca.key = crown jewel; certs can't be revoked.
+- etcd = cluster's key-value DB at /registry/<resource>/<ns>/<name>; only the API server talks to it (mTLS via etcd CA). etcdctl via healthcheck-client cert.
+- Namespaces now owned by YAML (k8s/vault/namespace.yaml, k8s/external-secrets/namespace.yaml), not `--create-namespace` → can carry PSA labels later.
+- Helm vs kubectl: our app = plain YAML (learning); third-party = Helm (34k lines for ESO; release tracking, upgrades prune, rollback). Chart ≈ Terraform module. Our own chart in step 7. `helm install --dry-run=server` = validate without changes; helm-diff plugin later.
+- ESO 2.14.0 installed: 25 CRDs (CRD = noun, controller = verb), controller + webhook (failurePolicy Fail = fail-closed) + cert-controller. Upstream ships restricted securityContext.
+- SecretStore `vault` (namespaced, serviceAccountRef eso-vault, audiences [vault]) → Valid in 3s. Client names the role; Vault decides policy. No SA token Secret exists (TokenRequest).
+- ExternalSecret `ghcr-pull`: fetch username+token → template into kubernetes.io/dockerconfigjson (kubelet requires Docker's config.json format) → Secret owned by the ExternalSecret, refresh 1m.
+- Stuck pod recovered on its next backoff retry → rollout finished: 777dfff9fb 2/2 (GHCR digest), 666c8f6695 scaled to 0. Second node pull: "already present on machine" (per-node image cache).
+
+## Session — 2026-10-27: break-it on the secrets pipeline + rollback
+- Vault sealed after colima start → SecretStore InvalidProviderConfig, ExternalSecret SecretSyncedError, Secret kept, app fine. After unseal ESO stayed broken: exponential backoff (~16m cap). Nudge = `kubectl annotate … force-sync=$(date +%s) --overwrite` (watch event → immediate reconcile); prod: `kubectl rollout restart deploy/external-secrets` resets all queues. Each object has its own backoff.
+- Rotation: new PAT → `vault kv put` (KV v2 version 2) → ESO rewrote Secret within 1m (data-hash annotation; same data = no write) → cordon + `crictl rmi` + delete pod forced a real pull on a cache-less node → old PAT revoked. Running containers don't need their image (snapshot).
+- Deleted Secret ghcr-pull → ESO recreated it the same second (watches owned Secrets).
+- ESO webhook scaled to 0 → writes to ExternalSecret rejected (failurePolicy Fail, "connection refused" to webhook Service); status/sync kept working.
+- etcdctl read /registry/secrets/invest/ghcr-pull → token in plaintext. Wrote `scripts/enable-etcd-encryption.sh` (secretbox, key generated on node, NOT run yet). EKS: envelope encryption with customer-managed KMS key. Encryption at rest ≠ access control: RBAC get/list secrets still reads decrypted.
+- RBAC hardening added to roadmap step 9 (CLAUDE.md).
+- Rollback: `rollout undo` → old RS scaled up as revision 3; last-applied annotation untouched → drift vs git; `kubectl apply` → revision 4, no diff, /healthz ok.
+- New: docs/kooper-teddies-notes.md (study guide with Mermaid diagrams), updated each PR.
+### Paused here
+PR for feat/ghcr-private open. Every `colima start`: unseal Vault:
+`security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
+Optional: run scripts/enable-etcd-encryption.sh and verify `k8s:enc:secretbox` prefix in etcd.
+Next: roadmap step 3 — Postgres StatefulSet + PVC, ConfigMaps (header map), Secrets via ESO.

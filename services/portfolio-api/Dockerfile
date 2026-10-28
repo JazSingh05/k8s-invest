@@ -19,6 +19,8 @@ RUN /venv/bin/python -m pytest -q
 
 # ---- runtime: only the venv + app code, running as non-root ----
 FROM ${PYTHON_IMAGE} AS runtime
+# Links the GHCR package to the repo (shows on the package page; lets CI push later).
+LABEL org.opencontainers.image.source=https://github.com/JazSingh05/k8s-invest
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/venv/bin:$PATH"
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app

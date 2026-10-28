@@ -1,0 +1,19 @@
+# HashiCorp Vault, standalone, for local learning.
+# Install: kubectl apply -f k8s/vault/namespace.yaml && helm install vault hashicorp/vault --version 0.34.1 -n vault -f k8s/vault/values.yaml
+#
+# Standalone = 1 replica, StatefulSet + PVC (file storage at /vault/data), so data
+# survives `colima stop`. Starts SEALED after every restart -> unseal by hand.
+# Listener has TLS disabled (chart default) -> in-cluster traffic is plaintext. OK for
+# a laptop; production would put TLS on the listener.
+
+server:
+  standalone:
+    enabled: true
+  dataStorage:
+    enabled: true
+    size: 1Gi
+
+# The agent injector is Vault's OTHER way to deliver secrets (sidecar per pod).
+# We're using External Secrets Operator instead, so leave it off.
+injector:
+  enabled: false

@@ -1,0 +1,10 @@
+# External Secrets Operator.
+# Install: kubectl apply -f k8s/external-secrets/namespace.yaml && helm install external-secrets external-secrets/external-secrets --version 2.14.0 -n external-secrets -f k8s/external-secrets/values.yaml
+#
+# Chart defaults are what we want: 3 Deployments (controller, webhook, cert-controller)
+# and the CRDs (SecretStore, ExternalSecret, ...).
+# Security: the controller's ClusterRole can get/create/update/delete Secrets in EVERY
+# namespace and mint tokens for ANY ServiceAccount (serviceaccounts/token create).
+# That's how it works, and why ESO is a high-value target: protect its namespace.
+
+installCRDs: true

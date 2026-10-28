@@ -41,3 +41,6 @@ __pycache__/
 node_modules/
 dist/
 bin/
+
+# Third-party Helm charts pulled locally for reading (installed from the pinned repo version)
+charts-vendor/
