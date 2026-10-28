@@ -133,6 +133,17 @@ sequenceDiagram
   D->>Old: scale 1 → 0 (kept for rollback)
 ```
 
+**Template change vs replica change.** The Deployment hashes only `spec.template`:
+
+| You change | New ReplicaSet? | What happens |
+|---|---|---|
+| `spec.template` (image, labels, env, imagePullSecrets…) | **Yes** (new hash) | Rolling update → new revision; old ReplicaSet kept at 0 for rollback |
+| `spec.replicas` | **No** | The current ReplicaSet is scaled. No rollout, no new revision (that's why an HPA can scale freely) |
+
+**Who owns what.** We never write ReplicaSets. The Deployment controller creates one per template version (name = `<deployment>-<pod-template-hash>`), copies the template into it, and sets an `ownerReference` back to the Deployment. The Deployment keeps the last `revisionHistoryLimit` (default 10) old ReplicaSets; you can't roll back past those. Don't edit a ReplicaSet directly; change the Deployment.
+
+**Rollback is done by the Deployment.** `kubectl rollout undo deployment/x` copies an old ReplicaSet's template back into the Deployment's `spec.template`, then the normal rolling update runs. A ReplicaSet has no history of its own. In k9s, "Rollback" (`ctrl-l`) sits on the ReplicaSet view only as a picker: each row is a revision, and k9s tells the owning Deployment to go back to it (same as `--to-revision=N`).
+
 - Defaults: `maxSurge 25%` (rounded up) and `maxUnavailable 25%` (rounded down). With 2 replicas that's +1 / −0.
 - A broken new version (e.g. `ImagePullBackOff`) **never removes old pods**: the rollout just stalls. After `progressDeadlineSeconds` it's marked failed, but it does **not** auto-rollback.
 - Without a **readiness probe**, "Ready" only means "the container started". A version that starts but returns errors would still roll out. (Probes: step 6.)
