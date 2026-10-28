@@ -128,5 +128,5 @@ Next: STOP — get Singh's revised app idea before step 2.
 ### Paused here
 PR for feat/ghcr-private open. Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Optional: run scripts/enable-etcd-encryption.sh and verify `k8s:enc:secretbox` prefix in etcd.
+Decided: keep unsealing Vault by hand until the EKS phase (then KMS auto-unseal); no unseal script, no etcd-encryption warm-up next session.
 Next: roadmap step 3 — Postgres StatefulSet + PVC, ConfigMaps (header map), Secrets via ESO.
