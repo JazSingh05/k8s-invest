@@ -18,7 +18,7 @@ spec:
         app: portfolio-api      # MUST match the selector above, or the API rejects it
     spec:
       # Private GHCR package: kubelet authenticates with this docker-registry Secret
-      # (read:packages-only token). Created imperatively, never committed.
+      # (read:packages-only token). ESO creates it from Vault (externalsecret-ghcr-pull.yaml).
       imagePullSecrets:
         - name: ghcr-pull
       containers:
