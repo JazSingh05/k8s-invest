@@ -98,6 +98,12 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 10. Monitoring: Prometheus/Grafana (with PVCs)
 11. Later: EKS phase (Terraform apply/destroy per session, Pod Identity, ALB + LB Controller, VPC CNI, RDS)
 
+## Image policy (decided 2026-10-28)
+- Every image the cluster runs comes from OUR GHCR (`ghcr.io/jazsingh05/...`), pinned by digest. Third-party images are mirrored with `scripts/mirror-image.sh` (source must be digest-pinned) into `ghcr.io/jazsingh05/kind/<name>`.
+- Visibility: Vault + ESO mirrors are PUBLIC (bootstrap layer: ESO creates the pull secret, so they must pull without one). Everything else (portfolio-api, Postgres, future mirrors) is PRIVATE, pulled with `ghcr-pull`.
+- Exceptions: Kubernetes system images built into the kind node image (EKS: AWS-provided).
+- Enforce in step 9 with a Kyverno policy (reject images outside `ghcr.io/jazsingh05/`).
+
 ## Ground rules
 - Never commit secrets. API keys go in k8s Secrets / local `.env` (gitignored).
 - Ask before installing anything new on my machine.

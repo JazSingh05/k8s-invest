@@ -125,8 +125,16 @@ Next: STOP — get Singh's revised app idea before step 2.
 - RBAC hardening added to roadmap step 9 (CLAUDE.md).
 - Rollback: `rollout undo` → old RS scaled up as revision 3; last-applied annotation untouched → drift vs git; `kubectl apply` → revision 4, no diff, /healthz ok.
 - New: docs/kooper-teddies-notes.md (study guide with Mermaid diagrams), updated each PR.
+
+## Session — 2026-10-28: Postgres prep + image policy
+- Postgres password generated straight into Vault (`openssl rand -hex 24` → `vault kv put secret/invest/postgres`, hex so it's URL-safe; app user `portfolio`, not the superuser). Covered by existing invest-read policy.
+- ExternalSecret `postgres-auth` with `dataFrom.extract` (copies all fields: username/password/database), refresh 1h → Secret Opaque, 3 keys. APPLIED.
+- Wrote k8s/postgres/statefulset.yaml + service.yaml (headless). Highlights: runAsUser/fsGroup 70, runAsNonRoot, automount off, secrets mounted as files (`*_FILE` env, defaultMode 0440 so group 70 can read), PGDATA subfolder, readinessProbe `pg_isready`, drop ALL caps, 2Gi volumeClaimTemplate. NOT applied yet.
+- StatefulSet = stable name + own disk (not one-per-node; that's a DaemonSet). Headless Service = DNS straight to the pod IP (no virtual IP / load-balancing). replicas>1 ≠ a DB cluster.
+- Image policy (CLAUDE.md): every image from our GHCR, digest-pinned; third-party mirrored with scripts/mirror-image.sh to ghcr.io/jazsingh05/kind/<name>. Vault + ESO mirrors PUBLIC (bootstrap: ESO creates the pull secret); everything else PRIVATE. Kyverno enforcement in step 9.
+- Gotcha: pushing a single-arch copy of a multi-arch image gives a NEW digest (a717… vs upstream index 266d…); local RepoDigests lied → verify digests against the registry. Script now takes the digest from the push output. Renaming a repo path = push again; layers are mounted, digest unchanged.
 ### Paused here
-PR for feat/ghcr-private open. Every `colima start`: unseal Vault:
+TODO Singh: delete unused GHCR package `mirror/postgres` (GitHub → Packages → Package settings → Delete).
+Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Decided: keep unsealing Vault by hand until the EKS phase (then KMS auto-unseal); no unseal script, no etcd-encryption warm-up next session.
-Next: roadmap step 3 — Postgres StatefulSet + PVC, ConfigMaps (header map), Secrets via ESO.
+Next: `kubectl apply -f k8s/postgres/service.yaml -f k8s/postgres/statefulset.yaml` → watch PVC Bound + 0/1→1/1 + private pull event → psql in → break it (kill pod, data survives) → mirror Vault + ESO (public) + helm upgrade → ConfigMap header map → wire portfolio-api → notes doc → PR.
