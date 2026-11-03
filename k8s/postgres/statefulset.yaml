@@ -36,34 +36,49 @@ spec:
           env:
             # *_FILE = read the value from a file, not from the env var itself.
             # Env vars leak into `ps e`, crash dumps and child processes; files don't.
+            # The ADMIN (superuser) creates the cluster on first start.
             - name: POSTGRES_USER_FILE
-              value: /run/secrets/postgres/username
+              value: /run/secrets/postgres-admin/username
             - name: POSTGRES_PASSWORD_FILE
-              value: /run/secrets/postgres/password
+              value: /run/secrets/postgres-admin/password
             - name: POSTGRES_DB_FILE
-              value: /run/secrets/postgres/database
+              value: /run/secrets/postgres-admin/database
             - name: PGDATA                  # a subfolder, so the volume root can hold other files
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
-            - name: auth
-              mountPath: /run/secrets/postgres
+            - name: admin-auth
+              mountPath: /run/secrets/postgres-admin
+              readOnly: true
+            - name: app-auth                # read by the init script to create the app user
+              mountPath: /run/secrets/postgres-app
+              readOnly: true
+            - name: initdb                  # first-start scripts (ConfigMap)
+              mountPath: /docker-entrypoint-initdb.d
               readOnly: true
           # Ready = "accepting connections", not just "process started".
           readinessProbe:
             exec:
-              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$(cat /run/secrets/postgres/username)\""]
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$(cat /run/secrets/postgres-admin/username)\""]
             periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
       volumes:
-        - name: auth
+        - name: admin-auth
           secret:
-            secretName: postgres-auth      # created by ESO from Vault
+            secretName: postgres-admin     # created by ESO from Vault
             defaultMode: 0440              # owner root + group 70 (fsGroup) can read; nobody else
+        - name: app-auth
+          secret:
+            secretName: postgres-app
+            defaultMode: 0440
+        - name: initdb
+          configMap:
+            name: postgres-initdb
+            defaultMode: 0555              # scripts must be readable (and runnable) by uid 70
   volumeClaimTemplates:
     - metadata:
         name: data                         # -> PVC data-postgres-0
