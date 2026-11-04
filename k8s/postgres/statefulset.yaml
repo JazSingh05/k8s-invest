@@ -58,9 +58,11 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
           # Ready = "accepting connections", not just "process started".
+          # -d is required: without it pg_isready tries a database named after the user
+          # ("pgadmin"), which doesn't exist -> a FATAL log line every 5s.
           readinessProbe:
             exec:
-              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$(cat /run/secrets/postgres-admin/username)\""]
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$(cat /run/secrets/postgres-admin/username)\" -d \"$(cat /run/secrets/postgres-admin/database)\""]
             periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
