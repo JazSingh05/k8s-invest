@@ -1,0 +1,33 @@
+# Init script: Postgres runs every *.sh / *.sql in /docker-entrypoint-initdb.d ONCE,
+# on first start with an EMPTY data directory (never again after that).
+# Creates the least-privilege app user. No passwords in here: they're read from the
+# mounted Secret files at runtime.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb
+  namespace: invest
+data:
+  10-app-user.sh: |
+    #!/bin/sh
+    set -eu
+    # Runs as the admin (POSTGRES_USER) over the local socket. The app password is
+    # read by psql itself (\set with backticks), so it never appears in argv.
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+    \set app_user `cat /run/secrets/postgres-app/username`
+    \set app_pass `cat /run/secrets/postgres-app/password`
+    \set db `cat /run/secrets/postgres-app/database`
+
+    -- A login role with no special powers.
+    CREATE ROLE :"app_user" LOGIN PASSWORD :'app_pass'
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+
+    -- Only the app user (and admin) may connect to this database.
+    REVOKE CONNECT ON DATABASE :"db" FROM PUBLIC;
+    GRANT CONNECT ON DATABASE :"db" TO :"app_user";
+
+    -- The app gets its own schema to create and own its tables in. Nothing else.
+    CREATE SCHEMA portfolio AUTHORIZATION :"app_user";
+    REVOKE ALL ON SCHEMA public FROM PUBLIC;
+    ALTER ROLE :"app_user" SET search_path = portfolio;
+    SQL

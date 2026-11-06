@@ -1,0 +1,17 @@
+# Headless Service (clusterIP: None): no virtual IP, DNS points straight at the pod.
+# Gives postgres-0 a stable name: postgres-0.postgres.invest.svc (and postgres.invest.svc).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: invest
+  labels:
+    app: postgres
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

@@ -125,8 +125,39 @@ Next: STOP — get Singh's revised app idea before step 2.
 - RBAC hardening added to roadmap step 9 (CLAUDE.md).
 - Rollback: `rollout undo` → old RS scaled up as revision 3; last-applied annotation untouched → drift vs git; `kubectl apply` → revision 4, no diff, /healthz ok.
 - New: docs/kooper-teddies-notes.md (study guide with Mermaid diagrams), updated each PR.
+
+## Session — 2026-10-28: Postgres prep + image policy
+- Postgres password generated straight into Vault (`openssl rand -hex 24` → `vault kv put secret/invest/postgres`, hex so it's URL-safe; app user `portfolio`, not the superuser). Covered by existing invest-read policy.
+- ExternalSecret `postgres-auth` with `dataFrom.extract` (copies all fields: username/password/database), refresh 1h → Secret Opaque, 3 keys. APPLIED.
+- Wrote k8s/postgres/statefulset.yaml + service.yaml (headless). Highlights: runAsUser/fsGroup 70, runAsNonRoot, automount off, secrets mounted as files (`*_FILE` env, defaultMode 0440 so group 70 can read), PGDATA subfolder, readinessProbe `pg_isready`, drop ALL caps, 2Gi volumeClaimTemplate. NOT applied yet.
+- StatefulSet = stable name + own disk (not one-per-node; that's a DaemonSet). Headless Service = DNS straight to the pod IP (no virtual IP / load-balancing). replicas>1 ≠ a DB cluster.
+- Image policy (CLAUDE.md): every image from our GHCR, digest-pinned; third-party mirrored with scripts/mirror-image.sh to ghcr.io/jazsingh05/kind/<name>. Vault + ESO mirrors PUBLIC (bootstrap: ESO creates the pull secret); everything else PRIVATE. Kyverno enforcement in step 9.
+- Gotcha: pushing a single-arch copy of a multi-arch image gives a NEW digest (a717… vs upstream index 266d…); local RepoDigests lied → verify digests against the registry. Script now takes the digest from the push output. Renaming a repo path = push again; layers are mounted, digest unchanged.
+
+## Session — 2026-11-02: Postgres running + data survives
+- Applied Postgres: PVC Pending → provisioner made folder + PV → Bound (invest-worker); pulled PRIVATE mirror via ghcr-pull; readiness probe failed during init ("no response") → 1/1. PV = a record of storage (folder), not a pod; PVs are cluster-wide, claims are namespaced; reclaim `Delete` = deleting the PVC deletes the data.
+- `kubectl get -w` only takes ONE resource type.
+- psql via `kubectl exec … psql` uses the local Unix socket (no password). `pods/exec` = shell next to the DB → lock down in step 9.
+- Killed postgres-0 twice: same name, same node (PV node affinity), new IP each time (.6 → .7 → …), row survived; logs: "Skipping initialization".
+- CORRECTION: official image makes POSTGRES_USER a SUPERUSER (prompt `=#`). Redesign: `pgadmin` (superuser, Postgres container only) + `portfolio_app` (no attributes, CONNECT on db, owns schema `portfolio`, can't create roles). Created by an init script in ConfigMap `postgres-initdb` (runs once on empty data dir; reads passwords via psql `\set` backticks, never argv). Tested in a throwaway local container: works, CREATE ROLE denied.
+- Gotcha: Colima only shares $HOME with Docker → bind mounts from /private/tmp are empty.
+## Session — 2026-11-03: least-privilege Postgres applied
+- Both passwords generated straight into Vault (`invest/postgres-admin` user pgadmin, `invest/postgres-app` user portfolio_app); old `invest/postgres` removed with `kv metadata delete` (plain `kv delete` = soft delete, restorable).
+- "Factory reset": scale sts to 0 → delete PVC → PV + node folder gone (reclaim Delete). Needed because initdb scripts only run on an EMPTY data dir.
+- Deleted ExternalSecret postgres-auth → its Secret went too (creationPolicy Owner → ownerReference → garbage collector).
+- Applied externalsecrets + configmap + sts: new PVC, both ES SecretSynced, logs show 10-app-user.sh ran (CREATE ROLE … ALTER ROLE).
+- ConfigMap = non-secret config outside the image (env vars or files). Secret = same shape, for sensitive values (hidden in describe, tighter RBAC). Never put passwords in a ConfigMap.
+- `volumes:` (pod level) = what + where from (PVC / Secret / ConfigMap); `volumeMounts:` (container) = where it appears; linked by name. Secret volumes are tmpfs (RAM). In a StatefulSet the `data` volume is added automatically from volumeClaimTemplates.
+- replicas = number of pods; `containers:` list = containers per pod (sidecars share IP + volumes). READY 1/1 = ready/total containers.
+- Bug: probe `pg_isready -U pgadmin` without `-d` → FATAL "database pgadmin does not exist" every 5s in Postgres logs while the probe still PASSED. Fixed with `-d`. Lesson: green probe ≠ correct probe; read the app logs. Re-apply restarted postgres-0 with the same PVC; init did not re-run.
+- 2026-11-05: verified. `\du`: pgadmin = Superuser/Create role/Create DB/Replication/Bypass RLS; portfolio_app = no attributes. `\dn`: schema portfolio owned by portfolio_app. Break-it as portfolio_app over TCP + password: CREATE TABLE in own schema OK; CREATE ROLE, ALTER ROLE … SUPERUSER, CREATE DATABASE, write to public, read pg_authid all DENIED. (Test table `portfolio.picks` left in place, empty.)
+- Mirrored Vault (`kind/vault` a46ff551…) and ESO (`kind/external-secrets` a6a2f852…) from the digests the pods already ran; flipped both packages PUBLIC in the GitHub UI (no API for visibility). Anonymous manifest fetch: vault 200, external-secrets 200, postgres 403 (still private).
+- Why public: bootstrap chicken-and-egg — ESO creates ghcr-pull, so ESO (and Vault, which ESO needs) can't require ghcr-pull to pull. On EKS this vanishes (nodes pull from ECR with their IAM role).
+- Both charts render `repository:tag` → digest pinned via tag `2.0.4@sha256:…`. ESO: one image for 3 Deployments → YAML anchor `&esoImage` / `*esoImage`.
+- `helm upgrade` → REVISION 2. ESO: rolling update, syncing never stopped. Vault: StatefulSet `updateStrategy: OnDelete` → template updated, pod NOT restarted; deleted vault-0 by hand → same name + PVC, came up 0/1 (sealed) → unseal → Ready on our image. Upgrade = seal event → why prod uses auto-unseal.
+- Now every non-system image in the cluster is ghcr.io/jazsingh05/… by digest. Remaining: kind system images (kindnetd, local-path-provisioner, coredns, etcd, kube-*) = allowed exception.
 ### Paused here
-PR for feat/ghcr-private open. Every `colima start`: unseal Vault:
+TODO Singh: delete unused GHCR package `mirror/postgres`.
+Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Optional: run scripts/enable-etcd-encryption.sh and verify `k8s:enc:secretbox` prefix in etcd.
-Next: roadmap step 3 — Postgres StatefulSet + PVC, ConfigMaps (header map), Secrets via ESO.
+Next: ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
