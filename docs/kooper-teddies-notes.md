@@ -20,6 +20,7 @@ Concepts only: no real data, no tokens. Updated with each PR that teaches someth
 14. [Break-it log: what failed and what it taught](#14-break-it-log)
 15. [Security one-liners (interview)](#15-security-one-liners-interview)
 16. [Command cheat sheet](#16-command-cheat-sheet)
+17. [Postgres: ConfigMaps, volumes, least-privilege users](#17-postgres-configmaps-volumes-least-privilege-users)
 
 ---
 
@@ -109,11 +110,14 @@ flowchart TB
 | **Pod** | one or more containers sharing an IP and volumes | disposable; never run bare |
 | **ReplicaSet** | "keep N pods of this template" | created by a Deployment; holds a frozen template |
 | **Deployment** | stateless apps (portfolio-api) | rolling updates, rollback, random pod names |
-| **StatefulSet** | stateful apps (Vault, later Postgres) | stable names (`vault-0`), one PVC per pod, ordered start |
+| **StatefulSet** | stateful apps (Vault, Postgres) | stable names (`vault-0`, `postgres-0`), one PVC per pod, ordered start |
 | **DaemonSet** | one pod per node (kube-proxy, kindnet) | node agents |
 
 - **Labels are routing, not identity.** Deployment `selector`, Service `selector` and the template's labels must line up. Anyone who can create pods in the namespace can add a matching label and receive Service traffic.
 - `containers:` is a list. One entry = one process from one image. The container `name` is ours to pick; pod names are generated.
+- **`replicas` = how many pods; the `containers:` list = how many containers in EACH pod.** Every replica is an identical copy of the template. 2 replicas × 2 containers = 4 containers. `READY 1/1` = ready containers / containers in that pod.
+- Two containers share a pod only when they must live together (same IP via `localhost`, shared volumes, start and die together): a **sidecar** like a log shipper, proxy or Vault Agent. Independent services (portfolio-api, Postgres) always get separate pods so they scale and restart separately.
+- **Update strategies:** Deployments and StatefulSets default to `RollingUpdate` (replace pods as soon as the template changes). The Vault chart uses **`OnDelete`**: the template updates, but the pod is only replaced when you delete it, because a restarted Vault comes up sealed.
 - Every pod gets a ServiceAccount token mounted by default (`kube-api-access-*`). Turn it off with `automountServiceAccountToken: false` when the app doesn't call the API.
 - No `resources` set → QoS `BestEffort` → first to be evicted under memory pressure.
 
@@ -183,6 +187,8 @@ flowchart LR
 - PVC name = `<template>-<statefulset>-<ordinal>` → `data-vault-0`. A replaced `vault-0` gets the same PVC back.
 - Deleting a StatefulSet keeps its PVCs (Kubernetes doesn't garbage-collect your data). Reclaim policy `Delete` vs `Retain` decides what happens to the PV when the PVC is deleted.
 - local-path volumes are plain 0777 folders on one node: fine for a laptop, no node-failure tolerance.
+- **Wiping a StatefulSet's disk on purpose** ("factory reset"): scale to 0 first (a PVC in use can't be removed: the `kubernetes.io/pvc-protection` finalizer waits), then delete the PVC. With reclaim `Delete` the PV and the node folder vanish too. No undo. Scale back up → a brand-new empty PVC from the template.
+- A PV is **not a pod**. It's a record describing a piece of storage (here, a folder on a node).
 
 ---
 
@@ -201,7 +207,23 @@ flowchart LR
 - `docker login` without a credential helper stores `base64(user:token)` in `~/.docker/config.json`. With `credsStore: osxkeychain` the file holds no secret.
 - **Registry token flow:** containerd asks `ghcr.io/token?scope=repository:…:pull` for a short-lived bearer token. Anonymous → 401 for a private package; with the pull secret → Basic auth → token → download.
 - Each node pulls and caches separately (`IfNotPresent`: no pull if cached). A running container doesn't need its image anymore (it runs from an unpacked snapshot).
-- **Publisher credential ≠ cluster credential:** laptop gh token has `write:packages`; the cluster's PAT has only `read:packages` and expires.
+- **Publisher credential ≠ cluster credential:** laptop gh token has `write:packages`; the cluster's Personal Access Token (PAT) has only `read:packages` and expires.
+
+**Image policy: every image comes from our GitHub Container Registry (GHCR), pinned by digest.**
+
+```mermaid
+flowchart LR
+  UP["upstream image<br/>(Docker Hub, other registries)<br/>pinned by digest"] -->|"scripts/mirror-image.sh<br/>pull arm64 → retag → push"| M[("ghcr.io/jazsingh05/kind/&lt;name&gt;")]
+  M -->|"PUBLIC: vault, external-secrets<br/>(bootstrap layer)"| B["Vault + ESO pods<br/>pull with no secret"]
+  M -->|"PRIVATE: postgres, portfolio-api"| A["app pods<br/>pull with ghcr-pull"]
+  B -.->|"ESO creates ghcr-pull<br/>from Vault"| A
+```
+
+- **Why mirror:** one registry we control, a digest we chose, no dependence on Docker Hub limits or outages, and one allow-list for Kyverno (step 9).
+- **Why Vault and the External Secrets Operator (ESO) are public:** chicken-and-egg. ESO *creates* the pull secret, so ESO's own image (and Vault's, which ESO needs) can't require it. They're unmodified upstream images, so public leaks nothing. On EKS the problem disappears: nodes pull from Elastic Container Registry (ECR) with their IAM role, no pull secret.
+- **Single-arch copy = new digest.** Upstream digests usually point at a multi-arch *index*; pushing only the arm64 image gives a different digest. Always take the digest from the registry (`docker manifest inspect -v`), not local `RepoDigests`.
+- **Pinning through Helm:** both charts render `repository:tag`, so the digest rides in the tag: `tag: "2.0.4@sha256:…"`. ESO uses one image in 3 Deployments → a YAML anchor (`&esoImage` / `*esoImage`) keeps them identical.
+- Exception: Kubernetes system images built into the kind node image (kube-apiserver, etcd, CoreDNS, kindnet, local-path-provisioner).
 
 ---
 
@@ -306,6 +328,11 @@ flowchart LR
 | ESO webhook scaled to 0 | Writes to ESO objects rejected | Fail-closed admission is an availability dependency |
 | Read etcd directly | Token in plaintext | Enable encryption at rest (KMS on EKS) |
 | `rollout undo` | Old ReplicaSet scaled up as a new revision; git ≠ cluster | Emergency button; then make git match |
+| Killed `postgres-0` (twice) | Same name, same node, new IP, data intact | StatefulSet identity + PVC follow the pod; never hard-code pod IPs |
+| Deleted Postgres PVC on purpose | PV and node folder gone; new pod got a fresh empty disk | Reclaim `Delete` = no undo; production uses `Retain` or snapshots |
+| Probe without `-d` | Probe PASSED while Postgres logged a FATAL every 5s | Green probe ≠ correct probe; read the app's logs |
+| App user tried to escalate | CREATE ROLE, ALTER ROLE SUPERUSER, CREATE DATABASE, write to `public`, read `pg_authid`: all denied | Least privilege proven by attack, not by claim |
+| `helm upgrade` Vault | Template updated, pod untouched (`OnDelete`); deleted pod came back sealed | An upgrade is a seal event → auto-unseal (KMS) in production |
 
 ---
 
@@ -319,6 +346,10 @@ flowchart LR
 - "Pin images by digest; tags are mutable."
 - "`ca.key`, `etcd/ca.key` and `sa.key` on a control-plane node are game over. That's why managed control planes hide them."
 - "Fail-closed admission is secure but becomes an availability dependency."
+- "The database bootstrap superuser is break-glass; the app gets a role with no attributes and one schema."
+- "Config in ConfigMaps, secrets in Secrets: if seeing it would hurt, it doesn't go in a ConfigMap."
+- "Mount secrets as files, not env vars: env vars leak into child processes and crash dumps, and Secret volumes live in RAM."
+- "The root of a trust chain can't depend on the chain: bootstrap components pull without the secret they create."
 
 ---
 
@@ -346,6 +377,67 @@ security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '
 # ESO
 kubectl get secretstore,externalsecret -n invest
 kubectl annotate externalsecret ghcr-pull -n invest force-sync=$(date +%s) --overwrite
+
+# Postgres (admin over the local socket; values read inside the pod)
+kubectl exec -it postgres-0 -n invest -- sh -c 'psql -U "$(cat /run/secrets/postgres-admin/username)" -d portfolio -c "\du" -c "\dn"'
+kubectl logs postgres-0 -n invest | grep -E 'FATAL|running /docker-entrypoint'
+
+# Helm
+helm upgrade <release> <chart> --version <pinned> -n <ns> -f <values.yaml>
+helm history <release> -n <ns>
+helm template <release> <chart> --version <pinned> -f <values.yaml> | grep image:   # render locally, check before upgrading
 ```
 
 zsh tip: single-quote any argument containing `[ ]`, `?` or `*` (jsonpath, custom-columns).
+
+---
+
+## 17. Postgres: ConfigMaps, volumes, least-privilege users
+
+```mermaid
+flowchart LR
+  subgraph Vault
+    VA["invest/postgres-admin"]
+    VP["invest/postgres-app"]
+  end
+  VA -->|ESO| SA["Secret postgres-admin"]
+  VP -->|ESO| SP["Secret postgres-app"]
+  CM["ConfigMap postgres-initdb<br/>10-app-user.sh"]
+  subgraph pod["Pod postgres-0"]
+    E["image entrypoint<br/>(first boot only)"]
+    I["our init script<br/>runs as pgadmin"]
+  end
+  SA -->|"files /run/secrets/postgres-admin"| E
+  SP -->|"files /run/secrets/postgres-app"| I
+  CM -->|"file /docker-entrypoint-initdb.d"| I
+  E --> U1["pgadmin<br/>superuser"]
+  I --> U2["portfolio_app<br/>no attributes, owns schema portfolio"]
+  PVC[("PVC data-postgres-0")] -->|"/var/lib/postgresql/data"| pod
+```
+
+**ConfigMap** = non-secret config kept outside the image, as key → value pairs. A value can be a short string or a whole file. Change config without rebuilding the image.
+
+| | ConfigMap | Secret |
+|---|---|---|
+| For | settings, scripts, mappings | passwords, tokens, keys |
+| `kubectl describe` | shows values | hides values |
+| Role-Based Access Control (RBAC) | usually readable broadly | lock down `get`/`list` |
+| etcd | plaintext | plaintext unless encryption at rest is on |
+
+**`volumes` vs `volumeMounts`:**
+- `volumes:` (pod level): *what* the data is and *where it comes from*: a PersistentVolumeClaim (PVC), a Secret, a ConfigMap. Given a name.
+- `volumeMounts:` (per container): *where* it appears inside that container. Refers to the volume by name.
+- Only the PVC volume is a real disk. Secret and ConfigMap volumes are files the kubelet writes from the API object; Secret volumes live in RAM (tmpfs). Each key becomes one file. `defaultMode` sets file permissions (`0440` secrets, `0555` scripts).
+- In a StatefulSet, the `data` volume isn't listed under `volumes:`: `volumeClaimTemplates` adds it automatically.
+- Mounted ConfigMap files update inside a running pod (about a minute); env vars from a ConfigMap never do.
+
+**How the two users are made (first boot on an empty disk only):**
+1. The official image reads `POSTGRES_USER_FILE`, `POSTGRES_PASSWORD_FILE`, `POSTGRES_DB_FILE` (the `_FILE` variants read the value from a mounted file), runs `initdb`, makes that user **superuser**, and creates the database.
+2. It then runs every script in `/docker-entrypoint-initdb.d/`. Ours logs in as the admin and creates `portfolio_app` with every power off (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`), revokes `CONNECT` from everyone else, gives it its own schema, and locks `public`. Passwords are read by psql from the Secret files, never in argv.
+3. Later boots see an existing data directory and skip both steps ("Skipping initialization"). To rerun them you must wipe the PVC.
+
+**Naming across layers:** Vault path `invest/postgres-app` → Kubernetes Secret `postgres-app` (the envelope) → database user `portfolio_app` (the name written inside it).
+
+**Least privilege, tested:** as `portfolio_app` over TCP with its password: creating a table in its own schema works; creating roles, promoting itself, creating databases, writing to `public` and reading password hashes (`pg_authid`) are all denied. Only the Postgres container ever gets the admin Secret; portfolio-api will get only `postgres-app`.
+
+**Readiness probe lesson:** `pg_isready -U pgadmin` without `-d` tries a database named `pgadmin`. The probe still passes (any server reply counts), but Postgres logs a FATAL every 5s. Always name the database.
