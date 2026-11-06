@@ -8,3 +8,15 @@
 # That's how it works, and why ESO is a high-value target: protect its namespace.
 
 installCRDs: true
+
+# Image from OUR GHCR (mirror of ghcr.io/external-secrets/external-secrets@sha256:10608eb…,
+# v2.14.0, arm64), pinned by digest (chart renders "repository:tag" -> digest rides in the tag).
+# One image, three Deployments -> set it in all three places.
+# PUBLIC package: ESO creates ghcr-pull, so it can't need ghcr-pull to start (bootstrap).
+image: &esoImage
+  repository: ghcr.io/jazsingh05/kind/external-secrets
+  tag: "v2.14.0@sha256:a6a2f852e771830554a31f3392e68d6251ef9322990413b20b9df2554c8b0ab7"
+webhook:
+  image: *esoImage
+certController:
+  image: *esoImage

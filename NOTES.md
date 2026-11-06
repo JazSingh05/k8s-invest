@@ -26,8 +26,13 @@
 - replicas = number of pods; `containers:` list = containers per pod (sidecars share IP + volumes). READY 1/1 = ready/total containers.
 - Bug: probe `pg_isready -U pgadmin` without `-d` → FATAL "database pgadmin does not exist" every 5s in Postgres logs while the probe still PASSED. Fixed with `-d`. Lesson: green probe ≠ correct probe; read the app logs. Re-apply restarted postgres-0 with the same PVC; init did not re-run.
 - 2026-11-05: verified. `\du`: pgadmin = Superuser/Create role/Create DB/Replication/Bypass RLS; portfolio_app = no attributes. `\dn`: schema portfolio owned by portfolio_app. Break-it as portfolio_app over TCP + password: CREATE TABLE in own schema OK; CREATE ROLE, ALTER ROLE … SUPERUSER, CREATE DATABASE, write to public, read pg_authid all DENIED. (Test table `portfolio.picks` left in place, empty.)
+- Mirrored Vault (`kind/vault` a46ff551…) and ESO (`kind/external-secrets` a6a2f852…) from the digests the pods already ran; flipped both packages PUBLIC in the GitHub UI (no API for visibility). Anonymous manifest fetch: vault 200, external-secrets 200, postgres 403 (still private).
+- Why public: bootstrap chicken-and-egg — ESO creates ghcr-pull, so ESO (and Vault, which ESO needs) can't require ghcr-pull to pull. On EKS this vanishes (nodes pull from ECR with their IAM role).
+- Both charts render `repository:tag` → digest pinned via tag `2.0.4@sha256:…`. ESO: one image for 3 Deployments → YAML anchor `&esoImage` / `*esoImage`.
+- `helm upgrade` → REVISION 2. ESO: rolling update, syncing never stopped. Vault: StatefulSet `updateStrategy: OnDelete` → template updated, pod NOT restarted; deleted vault-0 by hand → same name + PVC, came up 0/1 (sealed) → unseal → Ready on our image. Upgrade = seal event → why prod uses auto-unseal.
+- Now every non-system image in the cluster is ghcr.io/jazsingh05/… by digest. Remaining: kind system images (kindnetd, local-path-provisioner, coredns, etcd, kube-*) = allowed exception.
 ### Paused here
 TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: mirror Vault + ESO (public) + helm upgrade → ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
+Next: ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
