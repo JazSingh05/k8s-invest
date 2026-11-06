@@ -25,10 +25,9 @@
 - `volumes:` (pod level) = what + where from (PVC / Secret / ConfigMap); `volumeMounts:` (container) = where it appears; linked by name. Secret volumes are tmpfs (RAM). In a StatefulSet the `data` volume is added automatically from volumeClaimTemplates.
 - replicas = number of pods; `containers:` list = containers per pod (sidecars share IP + volumes). READY 1/1 = ready/total containers.
 - Bug: probe `pg_isready -U pgadmin` without `-d` → FATAL "database pgadmin does not exist" every 5s in Postgres logs while the probe still PASSED. Fixed with `-d`. Lesson: green probe ≠ correct probe; read the app logs. Re-apply restarted postgres-0 with the same PVC; init did not re-run.
+- 2026-11-05: verified. `\du`: pgadmin = Superuser/Create role/Create DB/Replication/Bypass RLS; portfolio_app = no attributes. `\dn`: schema portfolio owned by portfolio_app. Break-it as portfolio_app over TCP + password: CREATE TABLE in own schema OK; CREATE ROLE, ALTER ROLE … SUPERUSER, CREATE DATABASE, write to public, read pg_authid all DENIED. (Test table `portfolio.picks` left in place, empty.)
 ### Paused here
-Cluster runs the NEW Postgres (pgadmin + portfolio_app). Not yet done: verify `\du` / `\dn` (portfolio_app has empty attributes, schema portfolio owned by it):
-`kubectl exec -it postgres-0 -n invest -- sh -c 'psql -U "$(cat /run/secrets/postgres-admin/username)" -d portfolio -c "\du" -c "\dn"'`
 TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: verify `\du` → mirror Vault + ESO (public) + helm upgrade → ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
+Next: mirror Vault + ESO (public) + helm upgrade → ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
