@@ -8,6 +8,8 @@ numbers; nothing here invents a score or an opinion.
 from __future__ import annotations
 
 import csv
+import json
+import os
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -15,8 +17,10 @@ from pathlib import Path
 
 # Sheet header -> internal field. Columns are matched by HEADER NAME, not position,
 # so the real sheet can add/reorder columns without breaking us.
-# (Moves to a ConfigMap in step 3.)
-HEADER_MAP = {
+# In Kubernetes this comes from ConfigMap portfolio-api-header-map, mounted as a file
+# and pointed to by HEADER_MAP_FILE. This built-in copy is the default for tests and
+# local runs (no Kubernetes needed).
+DEFAULT_HEADER_MAP = {
     "Ticker": "ticker",
     "Exposure %": "exposure_pct",
     "Timeframe": "timeframe",
@@ -30,6 +34,8 @@ HEADER_MAP = {
     "Too Expensive": "too_expensive",
     "Update Date": "updated",
 }
+FIELDS = frozenset(DEFAULT_HEADER_MAP.values())
+REQUIRED_FIELDS = ("ticker", "timeframe", "price")
 
 STALE_AFTER_DAYS = 60
 
@@ -84,8 +90,36 @@ def _date(raw: str) -> date | None:
     return datetime.strptime(s, "%m/%d/%Y").date() if s else None
 
 
-def parse_row(row: dict[str, str]) -> Pick:
-    f = {field: (row.get(header) or "") for header, field in HEADER_MAP.items()}
+def load_header_map(path: str | None = None) -> dict[str, str]:
+    """Read the header map from HEADER_MAP_FILE (a mounted ConfigMap), else the default.
+
+    Read on every load on purpose: Kubernetes updates mounted ConfigMap files inside a
+    running pod, so a mapping change takes effect without a restart or a new image.
+    A bad map fails loudly instead of silently dropping a column.
+    """
+    path = path or os.environ.get("HEADER_MAP_FILE")
+    if not path:
+        return dict(DEFAULT_HEADER_MAP)
+    with open(path) as fh:
+        mapping = json.load(fh)
+    if not isinstance(mapping, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()
+    ):
+        raise ValueError("header map must be a JSON object of header -> field")
+    values = list(mapping.values())
+    unknown = set(values) - FIELDS
+    missing = FIELDS - set(values)
+    dupes = {v for v in values if values.count(v) > 1}
+    if unknown or missing or dupes:
+        raise ValueError(
+            f"bad header map: unknown={sorted(unknown)} missing={sorted(missing)} "
+            f"duplicated={sorted(dupes)}"
+        )
+    return mapping
+
+
+def parse_row(row: dict[str, str], header_map: dict[str, str]) -> Pick:
+    f = {field: (row.get(header) or "") for header, field in header_map.items()}
     priority = _num(f["priority"])
     return Pick(
         ticker=f["ticker"].strip().upper(),
@@ -103,13 +137,20 @@ def parse_row(row: dict[str, str]) -> Pick:
     )
 
 
-def load_picks(path: Path) -> list[Pick]:
+def load_picks(path: Path, header_map: dict[str, str] | None = None) -> list[Pick]:
+    header_map = header_map or load_header_map()
+    header_for = {field: header for header, field in header_map.items()}
+    ticker_header = header_for["ticker"]
     with path.open(newline="") as fh:
         reader = csv.DictReader(fh)
-        missing = {"Ticker", "Timeframe", "Current Price"} - set(reader.fieldnames or [])
+        # Required headers come from the MAP, so renaming a column is config-only.
+        required = {header_for[f] for f in REQUIRED_FIELDS}
+        missing = required - set(reader.fieldnames or [])
         if missing:
             raise ValueError(f"sheet is missing required columns: {sorted(missing)}")
-        return [parse_row(r) for r in reader if (r.get("Ticker") or "").strip()]
+        return [
+            parse_row(r, header_map) for r in reader if (r.get(ticker_header) or "").strip()
+        ]
 
 
 # --- rules -------------------------------------------------------------------

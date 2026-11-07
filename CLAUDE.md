@@ -82,6 +82,7 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - **Later:** web dashboard in-cluster (step 5, Ingress + TLS) with history, linked from each message; phone access via Tailscale, never exposed to the internet. No native app.
 - Deferred to V2+: Trend picks, my positions, exit/stop alerts, email ingest, rules engine, Redis.
 **Build-first plan (decided 2026-10-19):** build the whole V1 now against a FAKE sheet with the same columns as his (fake tickers/numbers), then subscribe and plug in. Plug-and-play = sheet ID + header→field mapping live in a ConfigMap; columns matched by HEADER NAME, not position, so layout differences only need a config change.
+**Sequencing (Singh, 2026-11-07):** finish V1 locally on fake data → subscribe → plug in his real sheet and get it fully working locally → only THEN migrate to EKS. Time the subscription for when V1 is ready end-to-end, so the first-month refund window is spent testing with real data.
 **Service facts (checkout page, 2026-10-19):** $599/yr; annual plan cancellable in first month for refund of remaining 11 months. Includes Long-Term Growth Portfolio (our V1 target), PowerFactors Microcaps, options/ETF strategies, weekly macro, chatroom with live trade alerts, valuation spreadsheet.
 **Open (after subscribing):** do trade alerts also arrive by email or only in chat; meaning of Priority Ranking (is 3 best?); meaning of purple-colored valuation numbers; real sheet layout (tabs, merged headers, hidden rows); whether sheet or alerts update first.
 
