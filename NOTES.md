@@ -170,4 +170,11 @@ Next: STOP — get Singh's revised app idea before step 2.
 TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
+Next (decided 2026-11-07): TLS to Postgres BEFORE wiring the app, branch feat/api-postgres (created, empty).
+  1) DECIDE: cert-manager mirror visibility (rec: PUBLIC = unmodified upstream platform layer; alt: private + pull secret via ESO in cert-manager ns). Update CLAUDE.md image policy.
+  2) Mirror cert-manager images (controller, webhook, cainjector, startupapicheck) → helm install pinned by digest.
+  3) Self-signed root → CA ClusterIssuer `invest-ca`.
+  4) Certificate postgres-tls (SANs postgres.invest.svc, postgres-0.postgres.invest.svc, …) → Secret.
+  5) Postgres ssl=on + custom pg_hba.conf: `hostssl` only (no plaintext TCP); verify with psql sslmode=disable → rejected.
+  6) THEN app: mount postgres-app Secret + ca.crt as files, psycopg, sslmode=verify-full, /readyz (SELECT 1) readinessProbe, NO DB check in liveness. Break-it: scale Postgres to 0 → API pods 0/1, no restarts.
+Later: Vault PKI as the CA behind cert-manager; NetworkPolicy (step 5) so only portfolio-api reaches 5432.
