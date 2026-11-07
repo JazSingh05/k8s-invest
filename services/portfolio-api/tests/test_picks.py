@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 
@@ -5,7 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.picks import Zone, distance, is_stale, load_picks, rank_long_term, zone
+from app.picks import (
+    DEFAULT_HEADER_MAP,
+    Zone,
+    distance,
+    is_stale,
+    load_header_map,
+    load_picks,
+    rank_long_term,
+    zone,
+)
 
 FAKE = Path(__file__).parent.parent / "data" / "fake_picks.csv"
 
@@ -87,3 +97,50 @@ def test_api_picks_and_health():
 
 def test_docs_disabled_by_default():
     assert TestClient(app).get("/docs").status_code == 404
+
+
+# --- header map (ConfigMap) ---------------------------------------------------
+
+def _renamed_map(tmp_path, old, new):
+    m = dict(DEFAULT_HEADER_MAP)
+    m[new] = m.pop(old)
+    f = tmp_path / "header-map.json"
+    f.write_text(json.dumps(m))
+    return f
+
+
+def test_renamed_header_is_config_only(tmp_path):
+    # His real sheet might call it "Price": only the map changes, not the code.
+    csv_file = tmp_path / "sheet.csv"
+    csv_file.write_text(FAKE.read_text().replace("Current Price", "Price", 1))
+    hm = load_header_map(str(_renamed_map(tmp_path, "Current Price", "Price")))
+    picks = {p.ticker: p for p in load_picks(csv_file, hm)}
+    assert picks["FAKEA"].price == 200.0
+
+
+def test_required_columns_follow_the_map(tmp_path):
+    # Map says the price column is "Price", but the sheet still says "Current Price".
+    hm = load_header_map(str(_renamed_map(tmp_path, "Current Price", "Price")))
+    with pytest.raises(ValueError, match=r"missing required columns: \['Price'\]"):
+        load_picks(FAKE, hm)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"Ticker": "ticker"},                                   # fields missing
+        {**DEFAULT_HEADER_MAP, "Shares": "shares"},             # unknown field
+        {**DEFAULT_HEADER_MAP, "Price 2": "price"},             # field mapped twice
+        ["not", "an", "object"],
+    ],
+)
+def test_bad_header_map_fails_loudly(tmp_path, bad):
+    f = tmp_path / "header-map.json"
+    f.write_text(json.dumps(bad))
+    with pytest.raises(ValueError):
+        load_header_map(str(f))
+
+
+def test_header_map_file_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("HEADER_MAP_FILE", str(_renamed_map(tmp_path, "Ticker", "Symbol")))
+    assert load_header_map()["Symbol"] == "ticker"

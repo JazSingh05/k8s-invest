@@ -1,0 +1,27 @@
+# Sheet column header -> internal field, mounted into portfolio-api as a FILE.
+# Plug-and-play: when the real sheet arrives, a renamed column is a change HERE,
+# not a code change or a new image. Column NAMES only: no tickers, no prices.
+#
+# Mounted as a directory (no subPath), so edits reach running pods in ~1 min and
+# the app picks them up on its next load. Env vars from a ConfigMap never update.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portfolio-api-header-map
+  namespace: invest
+data:
+  header-map.json: |
+    {
+      "Ticker": "ticker",
+      "Exposure %": "exposure_pct",
+      "Timeframe": "timeframe",
+      "Priority Ranking": "priority",
+      "Top Long Term Pick": "top_long_term",
+      "Timely Buy Now": "timely_buy",
+      "Current Price": "price",
+      "Fair Value": "fair_value",
+      "Cheap Valuation": "cheap",
+      "Deeply Undervalued": "deeply_undervalued",
+      "Too Expensive": "too_expensive",
+      "Update Date": "updated"
+    }

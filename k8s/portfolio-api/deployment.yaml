@@ -23,7 +23,18 @@ spec:
         - name: ghcr-pull
       containers:
         - name: portfolio-api
-          # Pinned by digest: the tag 0.1.1 can be moved to another image, the digest can't.
-          image: ghcr.io/jazsingh05/portfolio-api:0.1.1@sha256:3d4f9cd8e58cb6366fd2aa9b83f83b0c31980373c96d2462832a238786b9dfe5
+          # Pinned by digest: the tag 0.2.0 can be moved to another image, the digest can't.
+          image: ghcr.io/jazsingh05/portfolio-api:0.2.0@sha256:eb14e20754e84d952e996ac62b62233a9da5be88940e869cbaab8a0b67c265fc
           ports:
             - containerPort: 8000
+          env:
+            - name: HEADER_MAP_FILE           # app reads the column mapping from here
+              value: /config/header-map.json
+          volumeMounts:
+            - name: header-map
+              mountPath: /config               # whole directory, NOT subPath: subPath
+              readOnly: true                   # mounts never receive ConfigMap updates
+      volumes:
+        - name: header-map
+          configMap:
+            name: portfolio-api-header-map     # configmap-header-map.yaml

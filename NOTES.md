@@ -156,8 +156,18 @@ Next: STOP — get Singh's revised app idea before step 2.
 - Both charts render `repository:tag` → digest pinned via tag `2.0.4@sha256:…`. ESO: one image for 3 Deployments → YAML anchor `&esoImage` / `*esoImage`.
 - `helm upgrade` → REVISION 2. ESO: rolling update, syncing never stopped. Vault: StatefulSet `updateStrategy: OnDelete` → template updated, pod NOT restarted; deleted vault-0 by hand → same name + PVC, came up 0/1 (sealed) → unseal → Ready on our image. Upgrade = seal event → why prod uses auto-unseal.
 - Now every non-system image in the cluster is ghcr.io/jazsingh05/… by digest. Remaining: kind system images (kindnetd, local-path-provisioner, coredns, etcd, kube-*) = allowed exception.
+## Session — 2026-11-07: sheet header map → ConfigMap
+- Sequencing decided: V1 fully working locally on fake data → subscribe (time it so the 1-month refund window is spent testing real data) → plug in his sheet → then EKS. Recorded in CLAUDE.md.
+- portfolio-api 0.2.0 (eb14e207…): header map read from `HEADER_MAP_FILE` (mounted ConfigMap) on EVERY load, built-in default for tests/local; bad map (unknown/missing/duplicate field) → ValueError; required-columns check now uses the map (was hardcoded "Current Price"). 22 tests.
+- Legacy Docker builder runs EVERY stage → tests ran in a plain `docker build`. BuildKit skips unused stages → CI (step 8) must build `--target test` explicitly.
+- Push: only 2 new layers uploaded; 7 shared with 0.1.1 by digest.
+- Apply ConfigMap BEFORE the Deployment (missing ConfigMap → pod stuck ContainerCreating). `defaultMode: 420` = decimal for 0644.
+- Mount path is OUR choice (`mountPath`), file names = ConfigMap keys; app is told via env var. Postgres's path was fixed by its image. Pods only see ConfigMaps their own spec mounts.
+- ConfigMap volume = `..<timestamp>/` folder + `..data` symlink + `header-map.json -> ..data/…`. Update = write new folder, swap symlink atomically → app never reads a half-written file. `subPath` mounts bind the file itself → NEVER get updates.
+- Break-it: sed `"Current Price"`→`"Price"` in the live ConfigMap. API updated instantly; pod file ~1–3 min later (kubelet periodic sync + cache), no restart. Logs clean until a request: then 500 + `missing required columns: ['Price']`. Pods stayed 1/1 (no meaningful readiness probe → step 6).
+- Fix = re-apply from git (drift: cluster ≠ git; Argo CD auto-reverts in step 7). The two pods recovered ~20s apart → Service would have served mixed answers. Live update = slow + inconsistent window; rollout restart (or a config hash in the template) = consistent + gated by readiness.
 ### Paused here
 TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
-Next: ConfigMap sheet header map → wire portfolio-api to Postgres as portfolio_app → notes doc → PR.
+Next: wire portfolio-api to Postgres as portfolio_app → notes doc → PR.

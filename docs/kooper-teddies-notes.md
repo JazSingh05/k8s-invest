@@ -21,6 +21,7 @@ Concepts only: no real data, no tokens. Updated with each PR that teaches someth
 15. [Security one-liners (interview)](#15-security-one-liners-interview)
 16. [Command cheat sheet](#16-command-cheat-sheet)
 17. [Postgres: ConfigMaps, volumes, least-privilege users](#17-postgres-configmaps-volumes-least-privilege-users)
+18. [Live config: the sheet header map](#18-live-config-the-sheet-header-map)
 
 ---
 
@@ -333,6 +334,8 @@ flowchart LR
 | Probe without `-d` | Probe PASSED while Postgres logged a FATAL every 5s | Green probe ≠ correct probe; read the app's logs |
 | App user tried to escalate | CREATE ROLE, ALTER ROLE SUPERUSER, CREATE DATABASE, write to `public`, read `pg_authid`: all denied | Least privilege proven by attack, not by claim |
 | `helm upgrade` Vault | Template updated, pod untouched (`OnDelete`); deleted pod came back sealed | An upgrade is a seal event → auto-unseal (KMS) in production |
+| Renamed a header in the live ConfigMap | Pod file changed ~1–3 min later, no restart; logs clean until a request, then 500 `missing required columns`; pods stayed 1/1 | Config errors hide until traffic hits them; a meaningful readiness probe would catch it (step 6) |
+| Re-applied from git | The two pods recovered ~20s apart | Live config updates aren't simultaneous: the Service served mixed answers |
 
 ---
 
@@ -350,6 +353,7 @@ flowchart LR
 - "Config in ConfigMaps, secrets in Secrets: if seeing it would hurt, it doesn't go in a ConfigMap."
 - "Mount secrets as files, not env vars: env vars leak into child processes and crash dumps, and Secret volumes live in RAM."
 - "The root of a trust chain can't depend on the chain: bootstrap components pull without the secret they create."
+- "Fail loudly on bad config: a crash is better than a confident wrong number."
 
 ---
 
@@ -441,3 +445,34 @@ flowchart LR
 **Least privilege, tested:** as `portfolio_app` over TCP with its password: creating a table in its own schema works; creating roles, promoting itself, creating databases, writing to `public` and reading password hashes (`pg_authid`) are all denied. Only the Postgres container ever gets the admin Secret; portfolio-api will get only `postgres-app`.
 
 **Readiness probe lesson:** `pg_isready -U pgadmin` without `-d` tries a database named `pgadmin`. The probe still passes (any server reply counts), but Postgres logs a FATAL every 5s. Always name the database.
+
+---
+
+## 18. Live config: the sheet header map
+
+**Why:** his sheet's column names are *his*; the code uses *ours*. The map (header → field) lives in ConfigMap `portfolio-api-header-map`, so when the real sheet arrives, a renamed column is a config edit, not a code change, image build and rollout.
+
+```mermaid
+flowchart LR
+  G["configmap-header-map.yaml<br/>(git)"] -->|kubectl apply| CM["ConfigMap in etcd"]
+  CM -->|"kubelet periodic sync<br/>~1–3 min, per node"| F["/config/header-map.json<br/>inside each pod"]
+  E["env HEADER_MAP_FILE"] -.->|"tells app the path"| APP
+  F -->|"read on EVERY /picks request"| APP["picks.py<br/>load_header_map() + validate"]
+  APP -->|bad map| ERR["ValueError → HTTP 500<br/>(loud, not blank prices)"]
+```
+
+- **The path is ours to choose:** `volumeMounts.mountPath: /config` places the folder; the ConfigMap key `header-map.json` names the file; the env var `HEADER_MAP_FILE` tells the app. Nothing checks that these agree. (Postgres's `/docker-entrypoint-initdb.d` was the image's choice, not ours.)
+- **Mounted files update in running pods; env vars never do.** The app re-reads the file on each load, so an edit goes live with no restart.
+- **How updates stay atomic:** the mount is a timestamped folder `..2026_11_07_…/`, a symlink `..data` pointing at it, and `header-map.json -> ..data/header-map.json`. An update writes a new folder and swaps the symlink in one rename, so the app sees all-old or all-new, never half a file.
+- **`subPath` gotcha:** mounting a single file with `subPath` binds that file directly, so it never sees the symlink swap: **subPath mounts never update**.
+- **Not instant, not simultaneous:** each node's kubelet syncs on its own schedule. During the window, pods behind one Service disagree.
+
+| | Live file update | `kubectl rollout restart` (or config hash in the template) |
+|---|---|---|
+| Speed | 1–3 min, no restart | seconds per pod |
+| Consistency | pods disagree for a while | each pod is one version; new pods must pass readiness |
+| Safety net | none: bad config hits running pods | readiness probe can stop a bad rollout |
+
+- **Drift:** a hand-edit (`kubectl edit`, k9s `e`, `get | sed | apply`) makes cluster ≠ git. The fix is re-applying git; Argo CD (step 7) does that automatically.
+- **Order:** apply the ConfigMap before the Deployment; a missing ConfigMap leaves the pod in `ContainerCreating`.
+- `defaultMode: 420` in the API output is decimal for octal `0644`.
