@@ -22,6 +22,7 @@ Concepts only: no real data, no tokens. Updated with each PR that teaches someth
 16. [Command cheat sheet](#16-command-cheat-sheet)
 17. [Postgres: ConfigMaps, volumes, least-privilege users](#17-postgres-configmaps-volumes-least-privilege-users)
 18. [Live config: the sheet header map](#18-live-config-the-sheet-header-map)
+19. [TLS to Postgres, simply: the ID badge system (plan)](#19-tls-to-postgres-simply-the-id-badge-system-plan)
 
 ---
 
@@ -476,3 +477,55 @@ flowchart LR
 - **Drift:** a hand-edit (`kubectl edit`, k9s `e`, `get | sed | apply`) makes cluster ≠ git. The fix is re-applying git; Argo CD (step 7) does that automatically.
 - **Order:** apply the ConfigMap before the Deployment; a missing ConfigMap leaves the pod in `ContainerCreating`.
 - `defaultMode: 420` in the API output is decimal for octal `0644`.
+
+---
+
+## 19. TLS to Postgres, simply: the ID badge system (plan)
+
+**Transport Layer Security (TLS)** gives three things: the traffic is **encrypted**, can't be **tampered with**, and the client can **prove** who it's talking to. The proof is the part that matters: encrypting a connection to an impostor protects nothing.
+
+| Real world | Our version | Job |
+|---|---|---|
+| Badge office | **cert-manager** | prints badges, replaces them before they expire |
+| Official stamp | **our Certificate Authority (CA)** `invest-ca` | proves a badge is real; only the badge office has it |
+| Badge | **certificate** | "I am `postgres.invest.svc`", stamped by the CA |
+| Badge's secret PIN | **private key** | proves the holder owns the badge; never shared |
+| List of real stamps | **`ca.crt`** | lets anyone check a stamp is genuine |
+
+**How it connects**
+
+```mermaid
+sequenceDiagram
+  participant CM as cert-manager (badge office)
+  participant PG as Postgres
+  participant APP as portfolio-api
+  CM->>CM: 1. make the official stamp (our CA)
+  CM->>PG: 2. badge for postgres.invest.svc + secret PIN (Secret postgres-tls)
+  Note over PG: 3. door rule: network logins must be encrypted (pg_hba: hostssl only)
+  CM->>APP: 4. copy of the stamp only (ca.crt), never Postgres's PIN
+  APP->>PG: 5. "show me your badge"
+  PG->>APP: badge + proof it knows the PIN
+  Note over APP: real stamp? name = postgres.invest.svc? not expired? (verify-full)
+  APP->>PG: only now: password, over the encrypted line
+```
+
+Anything off (fake stamp, wrong name, expired badge, or an attempt to talk without encryption) → refused.
+
+**Why both sides check**
+- **Postgres refuses unencrypted callers** → a careless or misconfigured app can't send its password in the clear.
+- **The app refuses unverified servers** → an impostor pretending to be Postgres can't collect passwords.
+- One side alone leaves a hole; both together = locked.
+
+**What we build, in order**
+1. **Install the badge office**: cert-manager via Helm, its images mirrored to our GHCR first.
+2. **Create the official stamp**: a self-signed root CA + ClusterIssuer `invest-ca`.
+3. **Order Postgres's badge**: Certificate `postgres-tls` with the names clients dial as Subject Alternative Names (SANs), e.g. `postgres.invest.svc`.
+4. **Turn on encryption + put up the door rule**: Postgres `ssl=on`; `pg_hba.conf` (Postgres's access rules) from a ConfigMap via `-c hba_file=…`, with `hostssl` only for network logins. Not edited on the PersistentVolumeClaim (PVC): that would be drift outside git.
+5. **Test the door**: unencrypted login (`sslmode=disable`) → rejected; encrypted works; dialing the pod IP with `verify-full` → rejected (not a SAN).
+6. **Connect the app**: give it the stamp copy (`ca.crt`) and the `postgres-app` login as files; `sslmode=verify-full` + `sslrootcert`; a `/readyz` readiness check so Kubernetes knows when the app can't reach the database (no database check in liveness, or a database blip restarts every app pod).
+
+**Client `sslmode`, from worst to right:** `disable` (plaintext) → `prefer` (Postgres's default: silently falls back to plaintext) → `require` (encrypts, trusts any cert) → `verify-ca` (any cert from our CA) → **`verify-full`** (our CA *and* the right name). We use `verify-full`, never lower.
+
+**The one thing to protect:** the stamp, meaning the CA's private key. Whoever has it can print fake badges for *any* service. In step 9, Role-Based Access Control (RBAC) keeps almost everyone away from it; in production the root lives in a Hardware Security Module (HSM) or AWS Private CA, not in the cluster.
+
+**Later:** Vault as the CA behind cert-manager; mutual TLS (mTLS), where the app shows a badge too; NetworkPolicy (step 5) so only portfolio-api can reach port 5432.

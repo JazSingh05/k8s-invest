@@ -171,6 +171,7 @@ TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
 Next (decided 2026-11-07): TLS to Postgres BEFORE wiring the app, branch feat/api-postgres (created, empty).
+  Simple explanation (ID badge system) + build order: docs/kooper-teddies-notes.md §19.
   1) DECIDE: cert-manager mirror visibility (rec: PUBLIC = unmodified upstream platform layer; alt: private + pull secret via ESO in cert-manager ns). Update CLAUDE.md image policy.
   2) Mirror cert-manager images (controller, webhook, cainjector, startupapicheck) → helm install pinned by digest.
   3) Self-signed root → CA ClusterIssuer `invest-ca`.
