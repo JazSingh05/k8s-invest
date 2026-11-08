@@ -175,6 +175,6 @@ Next (decided 2026-11-07): TLS to Postgres BEFORE wiring the app, branch feat/ap
   2) Mirror cert-manager images (controller, webhook, cainjector, startupapicheck) → helm install pinned by digest.
   3) Self-signed root → CA ClusterIssuer `invest-ca`.
   4) Certificate postgres-tls (SANs postgres.invest.svc, postgres-0.postgres.invest.svc, …) → Secret.
-  5) Postgres ssl=on + custom pg_hba.conf: `hostssl` only (no plaintext TCP); verify with psql sslmode=disable → rejected.
-  6) THEN app: mount postgres-app Secret + ca.crt as files, psycopg, sslmode=verify-full, /readyz (SELECT 1) readinessProbe, NO DB check in liveness. Break-it: scale Postgres to 0 → API pods 0/1, no restarts.
+  5) Postgres ssl=on + pg_hba.conf from a ConfigMap (NOT edited on the PVC: drift) via `-c hba_file=/etc/postgresql/pg_hba.conf`; `hostssl` only + `local` socket; verify sslmode=disable → rejected. Current file: $PGDATA/pg_hba.conf (initdb + image's `host all all all scram-sha-256` = TLS optional).
+  6) THEN app: mount postgres-app Secret + ca.crt as files, psycopg, sslmode=verify-full + sslrootcert=ca.crt (host postgres.invest.svc must be a SAN; never lower than verify-full), /readyz (SELECT 1) readinessProbe, NO DB check in liveness. Break-it: scale Postgres to 0 → API pods 0/1, no restarts.
 Later: Vault PKI as the CA behind cert-manager; NetworkPolicy (step 5) so only portfolio-api reaches 5432.
