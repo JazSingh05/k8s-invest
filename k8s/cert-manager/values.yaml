@@ -1,7 +1,7 @@
 # cert-manager: the cluster's "badge office". Issues and auto-renews TLS certificates
 # from Certificate objects (see docs/kooper-teddies-notes.md §19).
-# Install (namespace + pull-secret.yaml FIRST, so ghcr-pull exists before pods pull):
-#   kubectl apply -f k8s/cert-manager/namespace.yaml -f k8s/cert-manager/pull-secret.yaml
+# Install (namespace + ghcr-pull-eso.yaml FIRST, so ghcr-pull exists before pods pull):
+#   kubectl apply -f k8s/cert-manager/namespace.yaml -f k8s/cert-manager/ghcr-pull-eso.yaml
 #   helm install cert-manager jetstack/cert-manager --version v1.21.3 -n cert-manager -f k8s/cert-manager/values.yaml
 #
 # Images: PRIVATE byte-identical copies of quay.io/jetstack/* in our GHCR (crane copy,

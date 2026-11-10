@@ -1,0 +1,64 @@
+# cert-manager's images are PRIVATE mirrors in our GHCR, so this namespace needs its
+# own `ghcr-pull` Secret (Secrets are namespaced: invest's copy can't be used here).
+# Same pipeline as invest, separate identity, NARROWER access:
+#   SA cert-manager/eso-vault -> Vault role cert-manager-eso -> policy ghcr-pull-read
+#   (reads secret/invest/ghcr-pull only; can NOT read the Postgres passwords).
+# Apply BEFORE `helm install cert-manager`, or its pods sit in ImagePullBackOff.
+
+# Identity this namespace uses to log in to Vault. No pod runs as it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-vault
+  namespace: cert-manager
+automountServiceAccountToken: false
+---
+# How this namespace reaches Vault (namespaced: only ExternalSecrets in cert-manager can use it).
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: vault
+  namespace: cert-manager
+spec:
+  provider:
+    vault:
+      server: http://vault.vault.svc:8200
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: cert-manager-eso
+          serviceAccountRef:
+            name: eso-vault
+            audiences:
+              - vault
+---
+# The docker-registry Secret the kubelet uses to pull cert-manager's images.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: ghcr-pull
+  namespace: cert-manager
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: vault
+  data:
+    - secretKey: username
+      remoteRef:
+        key: invest/ghcr-pull
+        property: username
+    - secretKey: token
+      remoteRef:
+        key: invest/ghcr-pull
+        property: token
+  target:
+    name: ghcr-pull
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/dockerconfigjson
+      engineVersion: v2
+      data:
+        .dockerconfigjson: '{"auths":{"ghcr.io":{"auth":"{{ printf "%s:%s" .username .token | b64enc }}"}}}'
