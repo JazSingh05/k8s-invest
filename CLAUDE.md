@@ -100,8 +100,8 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 11. Later: EKS phase (Terraform apply/destroy per session, Pod Identity, ALB + LB Controller, VPC CNI, RDS)
 
 ## Image policy (decided 2026-10-28)
-- Every image the cluster runs comes from OUR GHCR (`ghcr.io/jazsingh05/...`), pinned by digest. Third-party images are mirrored with `scripts/mirror-image.sh` (source must be digest-pinned) into `ghcr.io/jazsingh05/kind/<name>`.
-- Visibility: Vault + ESO mirrors are PUBLIC (bootstrap layer: ESO creates the pull secret, so they must pull without one). Everything else (portfolio-api, Postgres, future mirrors) is PRIVATE, pulled with `ghcr-pull`.
+- Every image the cluster runs comes from OUR GHCR (`ghcr.io/jazsingh05/...`), pinned by digest. Third-party images are mirrored with `scripts/mirror-image.sh` (source must be digest-pinned; `crane copy` registry→registry since 2026-11-09, so mirror digest == upstream digest) into `ghcr.io/jazsingh05/kind/<name>`.
+- Visibility: Vault + ESO mirrors are PUBLIC (bootstrap layer: ESO creates the pull secret, so they must pull without one). Everything else (portfolio-api, Postgres, cert-manager, future mirrors) is PRIVATE, pulled with `ghcr-pull`. Each namespace that pulls private images gets its own ESO pipeline + Vault role with policy `ghcr-pull-read` (that one path only).
 - Exceptions: Kubernetes system images built into the kind node image (EKS: AWS-provided).
 - Enforce in step 9 with a Kyverno policy (reject images outside `ghcr.io/jazsingh05/`).
 
@@ -112,4 +112,4 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - Repo is PUBLIC (github.com/JazSingh05/k8s-invest): code only — no newsletter data, no real positions.
 
 ## Current status
-Steps 1–2 DONE. Step 3 mostly done (2026-11-05, PR feat/step3-postgres): Postgres StatefulSet + PVC from a PRIVATE GHCR mirror; two DB users from Vault via ESO (`pgadmin` superuser for bootstrap only, `portfolio_app` least-privilege, created by init-script ConfigMap, escalation attempts verified denied); Vault + ESO now run from PUBLIC GHCR mirrors pinned by digest. Vault is unsealed by hand each start (command in NOTES.md); study guide in docs/kooper-teddies-notes.md (update it each PR). Sheet header map is a mounted ConfigMap (portfolio-api 0.2.0, 2026-11-07). NEXT: wire portfolio-api to Postgres as `portfolio_app`. Still waiting on Singh's subscription for real data.
+Steps 1–2 DONE. Step 3 mostly done (2026-11-05, PR feat/step3-postgres): Postgres StatefulSet + PVC from a PRIVATE GHCR mirror; two DB users from Vault via ESO (`pgadmin` superuser for bootstrap only, `portfolio_app` least-privilege, created by init-script ConfigMap, escalation attempts verified denied); Vault + ESO now run from PUBLIC GHCR mirrors pinned by digest. Vault is unsealed by hand each start (command in NOTES.md); study guide in docs/kooper-teddies-notes.md (update it each PR). Sheet header map is a mounted ConfigMap (portfolio-api 0.2.0, 2026-11-07). NEXT: TLS to Postgres via cert-manager (mirrors + pull secret done 2026-11-09; next = helm install), then wire portfolio-api to Postgres as `portfolio_app` with verify-full. Still waiting on Singh's subscription for real data.

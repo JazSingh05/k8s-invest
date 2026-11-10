@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 # Mirror a third-party image into our GHCR so the cluster only pulls from ghcr.io/jazsingh05.
 # Usage: scripts/mirror-image.sh <source-image@sha256:...> <name:tag>
-#   e.g. scripts/mirror-image.sh docker.io/library/postgres@sha256:266d... postgres:17-alpine
-# Pulls the arm64 image BY DIGEST (exactly what we reviewed), re-tags it under
-# ghcr.io/jazsingh05/kind/, pushes, and prints the digest to pin in manifests.
-# Needs `docker login ghcr.io` with write:packages (laptop credential, not the cluster's).
+#   e.g. scripts/mirror-image.sh quay.io/jetstack/cert-manager-controller@sha256:e396... cert-manager-controller:v1.21.3
+#
+# Registry-to-registry copy with crane (go-containerregistry): the bytes are copied as-is,
+# never unpacked locally, so the mirror's digest IS the source digest. That means:
+#   - verifying the mirror = comparing two equal digests
+#   - upstream signatures (cosign) stay valid on our copy
+#   - no dependency on the local Docker image store (its containerd snapshotter drops
+#     shared layer blobs, which broke the old pull/tag/push approach)
+# Pass the arm64 platform-manifest digest to copy one architecture, or the index digest
+# to copy every architecture.
+# Auth: crane reads ~/.docker/config.json (Keychain credential helper), so it uses the
+# laptop's `docker login ghcr.io` (write:packages), not the cluster's read-only token.
+# New GHCR packages are PRIVATE by default.
 set -euo pipefail
 SRC="${1:?source image with @sha256 digest}"
 DEST="ghcr.io/jazsingh05/kind/${2:?name:tag}"
 [[ "$SRC" == *@sha256:* ]] || { echo "source must be pinned by digest" >&2; exit 1; }
+WANT="${SRC##*@}"
 
-docker pull --platform linux/arm64 "$SRC"
-docker tag "$SRC" "$DEST"
-# The digest the REGISTRY now has is the last sha256 the push prints. (Local RepoDigests
-# can still show the source's multi-arch index digest, which isn't what we pushed.)
-DIGEST=$(docker push "$DEST" | grep -oE 'sha256:[a-f0-9]{64}' | tail -1)
-echo "Pin this in the manifest:"
-echo "${DEST%%:*}@${DIGEST}"
+crane copy "$SRC" "$DEST"
+GOT=$(crane digest "$DEST")
+[[ "$GOT" == "$WANT" ]] || { echo "digest mismatch: source $WANT, mirror $GOT" >&2; exit 1; }
+echo "Verified: mirror digest == source digest. Pin this in the manifest:"
+echo "${DEST%%:*}@${GOT}"

@@ -223,7 +223,10 @@ flowchart LR
 
 - **Why mirror:** one registry we control, a digest we chose, no dependence on Docker Hub limits or outages, and one allow-list for Kyverno (step 9).
 - **Why Vault and the External Secrets Operator (ESO) are public:** chicken-and-egg. ESO *creates* the pull secret, so ESO's own image (and Vault's, which ESO needs) can't require it. They're unmodified upstream images, so public leaks nothing. On EKS the problem disappears: nodes pull from Elastic Container Registry (ECR) with their IAM role, no pull secret.
-- **Single-arch copy = new digest.** Upstream digests usually point at a multi-arch *index*; pushing only the arm64 image gives a different digest. Always take the digest from the registry (`docker manifest inspect -v`), not local `RepoDigests`.
+- **Single-arch copy = new digest** (old method). Upstream digests usually point at a multi-arch *index*; re-pushing only the arm64 image gives a different digest.
+- **Mirror registry-to-registry with `crane copy`** (since 2026-11-09). The bytes are copied as-is, never unpacked locally, so **mirror digest == upstream digest**: verifying = comparing two equal hashes, and the vendor's signatures stay valid on our copy. The old `docker pull/tag/push` broke on Docker's containerd image store, which keeps unpacked *snapshots* of shared layers but drops their compressed blobs, so a push of an image sharing layers with one already present fails with `content digest … not found`.
+- **Mirroring pays off during outages:** quay.io was down ~20 min while we mirrored. Pods pulling from our GHCR wouldn't notice; anything pulling from quay.io would hit `ImagePullBackOff` on its next restart.
+- **One pull secret per namespace.** Secrets are namespaced, so each namespace pulling private images needs its own `ghcr-pull` from its own ESO pipeline, with a Vault role whose policy (`ghcr-pull-read`) reads that one path only.
 - **Pinning through Helm:** both charts render `repository:tag`, so the digest rides in the tag: `tag: "2.0.4@sha256:…"`. ESO uses one image in 3 Deployments → a YAML anchor (`&esoImage` / `*esoImage`) keeps them identical.
 - Exception: Kubernetes system images built into the kind node image (kube-apiserver, etcd, CoreDNS, kindnet, local-path-provisioner).
 
@@ -335,6 +338,7 @@ flowchart LR
 | Probe without `-d` | Probe PASSED while Postgres logged a FATAL every 5s | Green probe ≠ correct probe; read the app's logs |
 | App user tried to escalate | CREATE ROLE, ALTER ROLE SUPERUSER, CREATE DATABASE, write to `public`, read `pg_authid`: all denied | Least privilege proven by attack, not by claim |
 | `helm upgrade` Vault | Template updated, pod untouched (`OnDelete`); deleted pod came back sealed | An upgrade is a seal event → auto-unseal (KMS) in production |
+| cert-manager's identity asked Vault for the Postgres password | Logged in fine, then `403 permission denied`; no Secret created | Authentication ≠ authorization: scope each role's policy to exactly what it needs |
 | Renamed a header in the live ConfigMap | Pod file changed ~1–3 min later, no restart; logs clean until a request, then 500 `missing required columns`; pods stayed 1/1 | Config errors hide until traffic hits them; a meaningful readiness probe would catch it (step 6) |
 | Re-applied from git | The two pods recovered ~20s apart | Live config updates aren't simultaneous: the Service served mixed answers |
 
@@ -354,6 +358,8 @@ flowchart LR
 - "Config in ConfigMaps, secrets in Secrets: if seeing it would hurt, it doesn't go in a ConfigMap."
 - "Mount secrets as files, not env vars: env vars leak into child processes and crash dumps, and Secret volumes live in RAM."
 - "The root of a trust chain can't depend on the chain: bootstrap components pull without the secret they create."
+- "Mirror images byte-for-byte: same digest as upstream means you can still verify the vendor's signature."
+- "A valid identity gets you in the door; the policy decides what you can touch."
 - "Fail loudly on bad config: a crash is better than a confident wrong number."
 
 ---

@@ -1,0 +1,39 @@
+# cert-manager: the cluster's "badge office". Issues and auto-renews TLS certificates
+# from Certificate objects (see docs/kooper-teddies-notes.md §19).
+# Install (namespace + pull-secret.yaml FIRST, so ghcr-pull exists before pods pull):
+#   kubectl apply -f k8s/cert-manager/namespace.yaml -f k8s/cert-manager/pull-secret.yaml
+#   helm install cert-manager jetstack/cert-manager --version v1.21.3 -n cert-manager -f k8s/cert-manager/values.yaml
+#
+# Images: PRIVATE byte-identical copies of quay.io/jetstack/* in our GHCR (crane copy,
+# so these digests ARE the upstream arm64 digests). Pulled with ghcr-pull, which ESO
+# builds from Vault via role cert-manager-eso (policy ghcr-pull-read: that path only).
+# Security: the controller can read/write Secrets cluster-wide (it writes cert keys
+# into whatever namespace a Certificate lives in), and the CA key will live in this
+# namespace -> protect it in step 9 (RBAC).
+
+crds:
+  enabled: true      # install the CRDs (Certificate, Issuer, ClusterIssuer, ...) with the chart
+  keep: true         # `helm uninstall` leaves the CRDs, so it doesn't delete every Certificate
+
+global:
+  imagePullSecrets:
+    - name: ghcr-pull
+
+image:
+  repository: ghcr.io/jazsingh05/kind/cert-manager-controller
+  digest: sha256:e396f69ba33cf623694dcfb1f7c637911b06d71984350fb44158e0f7938f5a80
+
+webhook:
+  image:
+    repository: ghcr.io/jazsingh05/kind/cert-manager-webhook
+    digest: sha256:acef59f95954b7e94a7f8a3bcccd65608bec579db567ad5e2b5a1d38c4b75f62
+
+cainjector:
+  image:
+    repository: ghcr.io/jazsingh05/kind/cert-manager-cainjector
+    digest: sha256:02d5ccb77275b12db6ab5a6275860be90d334be70def56e16b49e4eb7d96f142
+
+startupapicheck:
+  image:
+    repository: ghcr.io/jazsingh05/kind/cert-manager-startupapicheck
+    digest: sha256:4049a9f87997def0396a82bcff58197870947ded66d6af0b1674ccce02f5391e

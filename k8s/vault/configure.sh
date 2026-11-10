@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure Vault for the invest namespace: policy + Kubernetes auth + role.
+# Configure Vault: policies + Kubernetes auth + one role per namespace (invest, cert-manager).
 # Safe to re-run. Uses the root token from macOS Keychain, passed over stdin
 # (never in argv, never printed). Vault must be unsealed.
 set -euo pipefail
@@ -26,4 +26,15 @@ vault_root 'vault write auth/kubernetes/role/invest-eso \
   bound_service_account_namespaces=invest \
   audience=vault \
   token_policies=invest-read \
+  token_ttl=15m' < /dev/null
+
+echo "4. Policy ghcr-pull-read: read secret/data/invest/ghcr-pull ONLY (no postgres secrets)"
+vault_root 'vault policy write ghcr-pull-read -' < policies/ghcr-pull-read.hcl
+
+echo "5. Role cert-manager-eso: SA cert-manager/eso-vault, audience vault -> policy ghcr-pull-read, 15m tokens"
+vault_root 'vault write auth/kubernetes/role/cert-manager-eso \
+  bound_service_account_names=eso-vault \
+  bound_service_account_namespaces=cert-manager \
+  audience=vault \
+  token_policies=ghcr-pull-read \
   token_ttl=15m' < /dev/null

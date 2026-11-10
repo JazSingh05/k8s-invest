@@ -166,14 +166,23 @@ Next: STOP — get Singh's revised app idea before step 2.
 - ConfigMap volume = `..<timestamp>/` folder + `..data` symlink + `header-map.json -> ..data/…`. Update = write new folder, swap symlink atomically → app never reads a half-written file. `subPath` mounts bind the file itself → NEVER get updates.
 - Break-it: sed `"Current Price"`→`"Price"` in the live ConfigMap. API updated instantly; pod file ~1–3 min later (kubelet periodic sync + cache), no restart. Logs clean until a request: then 500 + `missing required columns: ['Price']`. Pods stayed 1/1 (no meaningful readiness probe → step 6).
 - Fix = re-apply from git (drift: cluster ≠ git; Argo CD auto-reverts in step 7). The two pods recovered ~20s apart → Service would have served mixed answers. Live update = slow + inconsistent window; rollout restart (or a config hash in the template) = consistent + gated by readiness.
+## Session — 2026-11-09: cert-manager prep (mirrors + pull secret)
+- Decision (Singh): cert-manager mirrors PRIVATE → it gets its own pull-secret pipeline in ns cert-manager.
+- Old mirror method failed: containerd image store keeps unpacked snapshots but drops compressed blobs of SHARED layers (distroless layers shared with ESO) → push "content digest … not found".
+- Installed crane (go-containerregistry). scripts/mirror-image.sh now = `crane copy` registry→registry + check mirror digest == source digest. Byte-identical copy → same digest as upstream, upstream signatures stay valid, no local image store involved. Older mirrors (postgres, vault, ESO) still have re-pushed digests → re-copy later.
+- quay.io was down (502/504, "Service Under Maintenance") ~20 min → exactly why we mirror: running pods would have survived, new pulls from quay wouldn't.
+- Mirrored (PRIVATE, digests = upstream arm64): kind/cert-manager-{controller e396f69b…, webhook acef59f9…, cainjector 02d5ccb7…, startupapicheck 4049a9f8…} v1.21.3. Concurrent copies didn't conflict (content addressing); rerun = "existing manifest".
+- Vault: new policy `ghcr-pull-read` (secret/data/invest/ghcr-pull ONLY) + role `cert-manager-eso` (SA cert-manager/eso-vault). invest-read (invest/*) would have exposed the Postgres passwords.
+- Applied ns cert-manager + SA eso-vault + SecretStore vault + ExternalSecret ghcr-pull → Valid / SecretSynced. Same names as invest, no clash: namespaces scope names; Vault tells SAs apart by the namespace claim.
+- Break-it: ExternalSecret `steal-postgres` in cert-manager asking for invest/postgres-app → Vault 403 permission denied, no Secret created. AuthN worked, AuthZ denied. `describe` said only "could not get secret data"; the real reason was in the ESO controller logs.
+- Wrote k8s/cert-manager/values.yaml (private mirrors by digest, global.imagePullSecrets ghcr-pull, crds.enabled + crds.keep). helm template check: chart = 6 CRDs, 3 Deployments, 1 Job, 13 ClusterRoles + 10 ClusterRoleBindings. acmesolver still points at quay.io (only used for public ACME / Let's Encrypt; never pulled here).
 ### Paused here
 TODO Singh: delete unused GHCR package `mirror/postgres`.
 Every `colima start`: unseal Vault:
 `security find-generic-password -a vault -s kind-invest-vault-unseal -w | tr -d '\n' | kubectl exec -i -n vault vault-0 -- vault write sys/unseal key=-`
 Next (decided 2026-11-07): TLS to Postgres BEFORE wiring the app, branch feat/api-postgres (created, empty).
   Simple explanation (ID badge system) + build order: docs/kooper-teddies-notes.md §19.
-  1) DECIDE: cert-manager mirror visibility (rec: PUBLIC = unmodified upstream platform layer; alt: private + pull secret via ESO in cert-manager ns). Update CLAUDE.md image policy.
-  2) Mirror cert-manager images (controller, webhook, cainjector, startupapicheck) → helm install pinned by digest.
+  1–2) DONE 2026-11-09 (private mirrors + pull-secret pipeline). NEXT: `helm install cert-manager jetstack/cert-manager --version v1.21.3 -n cert-manager -f k8s/cert-manager/values.yaml` → 3 pods Running + startupapicheck Completed → tour CRDs.
   3) Self-signed root → CA ClusterIssuer `invest-ca`.
   4) Certificate postgres-tls (SANs postgres.invest.svc, postgres-0.postgres.invest.svc, …) → Secret.
   5) Postgres ssl=on + pg_hba.conf from a ConfigMap (NOT edited on the PVC: drift) via `-c hba_file=/etc/postgresql/pg_hba.conf`; `hostssl` only + `local` socket; verify sslmode=disable → rejected. Current file: $PGDATA/pg_hba.conf (initdb + image's `host all all all scram-sha-256` = TLS optional).
