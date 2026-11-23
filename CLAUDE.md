@@ -45,7 +45,7 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 
 **Design principles (decided 2026-10-18):**
 - **Rules decide, Claude reads.** Alerts come from deterministic rules on his data (trend stop, valuation zones, timely-buy flags, his trims). Claude (Haiku) only extracts structure from emails and writes summaries. Claude does not give investment advice.
-- **Alerts only.** No brokerage API, no trade execution, no brokerage credentials anywhere.
+- **Alerts only.** No brokerage API, no trade execution, no brokerage credentials anywhere. One narrow exception (decided 2026-11-22, V2): Robinhood's OFFICIAL MCP for READ-ONLY position tracking, under the guardrails in "V2: my positions" below.
 - **Licensed data stays private.** His sheet/picks/emails live only in local Postgres. Never in the public repo, never in test fixtures (use fake tickers/numbers), never screenshots.
 - **Data path:** his sheet → my own Google Sheet (IMPORTRANGE or manual copy) → app reads MY sheet via Sheets API (read-only service account, shared on that one sheet only) → poll + diff snapshots → change events. Never scrape his sheet or seekingalpha.com.
 - **Notifications:** Telegram bot (private chat). Not SMS, not public ntfy topics.
@@ -81,6 +81,15 @@ Budget: ~$0–5/month (only Claude API usage). Do not create any cloud resources
 - V1 services: portfolio-api (step 2), Postgres (step 3), daily-digest CronJob + Telegram notifier (step 4). Current price comes from his sheet → no market-data service yet.
 - **Later:** web dashboard in-cluster (step 5, Ingress + TLS) with history, linked from each message; phone access via Tailscale, never exposed to the internet. No native app.
 - Deferred to V2+: Trend picks, my positions, exit/stop alerts, email ingest, rules engine, Redis.
+- **V2: my positions vs his picks + YTD return since following him (decided 2026-11-22):**
+  - Source: Robinhood official MCP (`https://agent.robinhood.com/mcp/trading`), used in interactive Claude Code sessions only, never from the cluster. Fallback / in-app feed: CSV export → local Postgres importer. NEVER the unofficial login libraries (robin_stocks etc.: full account access).
+  - It has NO read-only scope: read = all accounts (positions, balances, transactions, account numbers) + trade tools (place_*/cancel_*), trading limited to a separate "Agentic" account. "Read-only" is built by us, three layers:
+    1. Agentic account kept at $0 + Trade approvals ON (Agent Settings → Safety Controls).
+    2. Claude Code permission DENY rules for every robinhood `place_*` / `cancel_*` tool, written BEFORE first use.
+    3. Claude never places, cancels, or recommends trades (hard rule regardless of request).
+  - Singh connects and authenticates it himself (opening the Agentic account is his step). Disconnect in the Robinhood app to revoke.
+  - Data flow: holdings + account numbers pass through Claude's context when asked → accepted knowingly. Positions = same rule as his data: local Postgres only, never repo/fixtures/screenshots; no dollar amounts in Telegram (counts like "7 of his 12 LT picks" only); amounts on the Tailscale dashboard.
+  - Math (overlap, realized + unrealized YTD) = deterministic rules code, not Claude. Reports only, no advice.
 **Build-first plan (decided 2026-10-19):** build the whole V1 now against a FAKE sheet with the same columns as his (fake tickers/numbers), then subscribe and plug in. Plug-and-play = sheet ID + header→field mapping live in a ConfigMap; columns matched by HEADER NAME, not position, so layout differences only need a config change.
 **Sequencing (updated 2026-11-22):** buy on day 1 of Singh's 5 days off; build the rest of V1 against his REAL sheet inside the 1-month refund window → only THEN migrate to EKS. Supersedes 2026-11-07 "finish V1 on fake data first".
 - Day 1: buy; copy his sheet into Singh's own Google Sheet; answer the open questions (Priority meaning, layout, purple numbers); fix header-map ConfigMap so /picks ranks real data; finish Postgres TLS (ssl=on + hostssl-only pg_hba.conf).
