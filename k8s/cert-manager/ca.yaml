@@ -1,0 +1,43 @@
+# Our private Certificate Authority (the "official stamp", docs/kooper-teddies-notes.md §19).
+# Three objects, because someone has to sign the FIRST certificate:
+#   1. ClusterIssuer selfsigned   - signs a cert with that cert's own key (no parent). Used once.
+#   2. Certificate invest-ca-root - the root CA (isCA: true), signed by 1 -> Secret invest-ca-root
+#   3. ClusterIssuer invest-ca    - signs every service cert with the key in that Secret
+#
+# Security: Secret cert-manager/invest-ca-root holds the ROOT PRIVATE KEY. Whoever reads it
+# can mint a "valid" cert for ANY service in the cluster. Only cert-manager should read it
+# (lock down in step 9, RBAC). In production the root lives in an HSM / AWS Private CA.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: invest-ca-root
+  namespace: cert-manager     # a ClusterIssuer reads its CA Secret from cert-manager's own namespace
+spec:
+  isCA: true                  # this cert may sign other certs
+  commonName: invest-ca-root
+  secretName: invest-ca-root
+  duration: 87600h            # 10 years: every client trusts the root, so rotating it is painful
+  renewBefore: 720h           # renew 30 days before expiry
+  privateKey:
+    algorithm: ECDSA          # P-256: smaller and faster than RSA, supported by Postgres + Python
+    size: 256
+    rotationPolicy: Always    # a renewal makes a NEW key, not the same key re-signed
+  issuerRef:
+    kind: ClusterIssuer
+    name: selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: invest-ca
+spec:
+  ca:
+    secretName: invest-ca-root
