@@ -1,0 +1,36 @@
+# Postgres's TLS server certificate (its "ID badge", docs/kooper-teddies-notes.md §19).
+# cert-manager asks ClusterIssuer invest-ca (our private root, k8s/cert-manager/ca.yaml) to sign it
+# and writes Secret invest/postgres-tls:
+#   tls.crt = this cert (public)   tls.key = Postgres's private key   ca.crt = the root (clients trust this)
+#
+# Security:
+#   - SANs = the ONLY names this cert is valid for. Clients use sslmode=verify-full, which rejects
+#     the connection if the hostname they dialed is not listed here.
+#   - No IP SANs: pod IPs change on every restart, and leaving them out forces clients to use DNS names.
+#   - usages: server auth only -> the key can't be used as a client cert or to sign other certs.
+#   - 90 days, renewed at day 60: a stolen key goes stale fast. Renewal = new key (rotationPolicy Always).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgres-tls
+  namespace: invest
+spec:
+  secretName: postgres-tls
+  commonName: postgres.invest.svc     # legacy field; clients check the SANs below, not this
+  dnsNames:
+    - postgres.invest.svc.cluster.local              # Service name, fully qualified
+    - postgres.invest.svc                            # what portfolio-api will dial
+    - postgres-0.postgres.invest.svc.cluster.local   # the pod's own stable name (headless Service)
+    - postgres-0.postgres.invest.svc
+  duration: 2160h       # 90 days
+  renewBefore: 720h     # renew 30 days before expiry (day 60)
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - digital signature   # ECDSA keys sign the TLS handshake
+  issuerRef:
+    kind: ClusterIssuer
+    name: invest-ca

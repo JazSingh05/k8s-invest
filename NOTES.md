@@ -187,6 +187,7 @@ Next: STOP — get Singh's revised app idea before step 2.
 - CertificateRequest REQUESTER = system:serviceaccount:cert-manager:cert-manager; Secret managedFields manager = cert-manager-certificates-issuing → the controller made it, not me.
 - Decoded tls.crt only: Issuer == Subject (self-signed = root), CA:TRUE, P-256, 10y. Every root is self-signed (public ones too); trust comes from distribution (trust store / sslrootcert), not the signature. macOS openssl = LibreSSL → no `-ext`, use `-text | grep`.
 - Break-it: deleted Secret invest-ca-root → rebuilt in 3s as request -2 with a NEW key (rotationPolicy Always, new SHA-256 fingerprint). Self-healing silently replaced the root of trust → protect with RBAC + alerting; prod root lives outside the cluster. Old request -1 auto-deleted (revisionHistoryLimit defaults to 1).
+- postgres-tls: leaf cert signed by invest-ca → Issuer CN=invest-ca-root ≠ Subject CN=postgres.invest.svc, CA:FALSE, 4 DNS SANs (no IPs, no bare `postgres`), server auth only, 90d. `openssl verify -CAfile ca.crt` → OK (chain proven). cert-manager's SA writes Secrets in EVERY namespace → one of the most powerful identities (step 9).
 
 ### Paused here
 TODO Singh: delete unused GHCR package `mirror/postgres`.
@@ -196,7 +197,8 @@ Next (decided 2026-11-07): TLS to Postgres BEFORE wiring the app, branch feat/ap
   Simple explanation (ID badge system) + build order: docs/kooper-teddies-notes.md §19.
   1–2) DONE 2026-11-09 (private mirrors + pull-secret pipeline). cert-manager helm install DONE 2026-11-16 (3 pods from private mirrors, CRDs toured).
   3) DONE 2026-11-22: root CA + ClusterIssuer invest-ca (k8s/cert-manager/ca.yaml).
-  4) NEXT: Certificate postgres-tls (SANs postgres.invest.svc, postgres-0.postgres.invest.svc, …) → Secret.
+  4) DONE 2026-11-22: Certificate postgres-tls (k8s/postgres/certificate.yaml). NEXT = 5.
+  was: Certificate postgres-tls (SANs postgres.invest.svc, postgres-0.postgres.invest.svc, …) → Secret.
   5) Postgres ssl=on + pg_hba.conf from a ConfigMap (NOT edited on the PVC: drift) via `-c hba_file=/etc/postgresql/pg_hba.conf`; `hostssl` only + `local` socket; verify sslmode=disable → rejected. Current file: $PGDATA/pg_hba.conf (initdb + image's `host all all all scram-sha-256` = TLS optional).
   6) THEN app: mount postgres-app Secret + ca.crt as files, psycopg, sslmode=verify-full + sslrootcert=ca.crt (host postgres.invest.svc must be a SAN; never lower than verify-full), /readyz (SELECT 1) readinessProbe, NO DB check in liveness. Break-it: scale Postgres to 0 → API pods 0/1, no restarts.
 Later: Vault PKI as the CA behind cert-manager; NetworkPolicy (step 5) so only portfolio-api reaches 5432.
